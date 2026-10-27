@@ -18,6 +18,14 @@ jobs:
         run: |
           Expand-Archive -LiteralPath "TrafficSignalStudio_GitHub_Import.zip" -DestinationPath "." -Force
 
+      - name: Apply SUMO-first application sources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "TrafficSignalStudio/app/integrations" | Out-Null
+          Copy-Item "main_window.py" "TrafficSignalStudio/app/ui/main_window.py" -Force
+          Copy-Item "sumo_engine.py" "TrafficSignalStudio/app/integrations/sumo_engine.py" -Force
+          Copy-Item "test_sumo_engine.py" "TrafficSignalStudio/tests/test_sumo_engine.py" -Force
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
