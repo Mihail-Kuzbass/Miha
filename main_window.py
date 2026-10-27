@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QComboBox, QFileDialog, QAbstractItemView
 )
 from app.editor.intersection_view import IntersectionView
+from app.editor.lane_route_editor import LaneRouteEditor
 from app.signals.plan import Phase, SignalPlan
 from app.simulation.engine import SimulationConfig, run_simulation
 from app.simulation.microsim import MicroSimulationConfig, run_microsimulation
@@ -43,6 +44,8 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(self._build_map_tab(), "2ГИС / импорт")
         tabs.addTab(self._build_scheme_tab(), "Схема")
+        self.route_editor = LaneRouteEditor()
+        tabs.addTab(self.route_editor, "Полосы и маршруты")
         tabs.addTab(self._build_signals_tab(), "Светофорная программа")
         tabs.addTab(self._build_demand_tab(), "Транспортный поток")
         tabs.addTab(self._build_results_tab(), "Результаты")
