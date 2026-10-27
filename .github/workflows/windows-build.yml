@@ -41,6 +41,12 @@ jobs:
           Copy-Item -LiteralPath "test_microsim.py" -Destination "TrafficSignalStudio/tests/test_microsim.py" -Force
           python -m pytest -q TrafficSignalStudio/tests
 
+      - name: Compile modules and smoke-test application imports
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "TrafficSignalStudio"
+          python -m compileall -q TrafficSignalStudio/app
+          python -c "from app.ui.main_window import MainWindow; print('MainWindow import OK')"
 
       - name: Build EXE
         run: >
