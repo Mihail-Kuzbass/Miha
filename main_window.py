@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
             lane_graph = LaneRouteGraph.from_dict(data.get("lane_graph", {
                 "schema_version": 1, "lanes": [], "connections": [],
             }))
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as exc:
             QMessageBox.warning(self, "Ошибка загрузки проекта", str(exc))
             return
 
