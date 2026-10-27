@@ -24,6 +24,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "TrafficSignalStudio/app/integrations" | Out-Null
           Copy-Item "main_window.py" "TrafficSignalStudio/app/ui/main_window.py" -Force
           Copy-Item "intersection_view.py" "TrafficSignalStudio/app/editor/intersection_view.py" -Force
+          Copy-Item "signal_plan.py" "TrafficSignalStudio/app/signals/plan.py" -Force
           Copy-Item "sumo_engine.py" "TrafficSignalStudio/app/integrations/sumo_engine.py" -Force
           Copy-Item "test_sumo_engine.py" "TrafficSignalStudio/tests/test_sumo_engine.py" -Force
           Copy-Item "README.md" "TrafficSignalStudio/README.md" -Force
