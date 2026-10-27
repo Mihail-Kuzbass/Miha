@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 from pathlib import Path
 import re
 import sys
@@ -116,11 +117,43 @@ def apply(path: Path, output: Path) -> tuple[int, int]:
         if msgstr is not None and msgstr.strip():
             continue
         translated = TRANSLATIONS[msgid]
-        encoded = repr(translated)
-        # PO uses C-style double-quoted strings, not Python single-quoted repr.
-        import json
+        # PO uses C-style double-quoted strings. Limit whitespace to horizontal
+        # whitespace so the replacement cannot consume adjacent lines.
         encoded = json.dumps(translated, ensure_ascii=False)
-        updated, count = re.subn(r'(?m)^(\s*)msgstr ""\s*$', lambda m: m.group(1) + "msgstr " + encoded, block, count=1)
+        updated, count = re.subn(r'(?m)^([ \t]*)msgstr ""[ \t]*
+        if count:
+            blocks[index] = updated
+            applied += 1
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("".join(blocks), encoding="utf-8")
+    return applied, len(set(TRANSLATIONS) - found)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input", type=Path, help="upstream ru_gui.po")
+    parser.add_argument("output", type=Path, help="destination PO file")
+    parser.add_argument("--in-place", action="store_true", help="allow input and output to be the same file")
+    args = parser.parse_args()
+    if not args.input.is_file():
+        print(f"ERROR: input file not found: {args.input}", file=sys.stderr)
+        return 2
+    if args.input.resolve() == args.output.resolve() and not args.in_place:
+        print("ERROR: refusing to overwrite input; pass --in-place explicitly", file=sys.stderr)
+        return 2
+    try:
+        applied, not_found = apply(args.input, args.output)
+    except (UnicodeError, SyntaxError, ValueError) as exc:
+        print(f"ERROR: could not process PO file: {exc}", file=sys.stderr)
+        return 2
+    print(f"Applied {applied} translations; {not_found} source IDs were not found (may indicate upstream version drift).")
+    print(f"Output: {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+, lambda m: m.group(1) + "msgstr " + encoded, block, count=1)
         if count:
             blocks[index] = updated
             applied += 1
