@@ -4,6 +4,8 @@ name: TrafficSignalStudio Windows Build
 on:
   workflow_dispatch:
   push:
+    branches: [main, development/original-project-no-sumo]
+  pull_request:
     branches: [main]
 
 jobs:
@@ -18,6 +20,9 @@ jobs:
         shell: pwsh
         run: |
           Expand-Archive -LiteralPath "TrafficSignalStudio_GitHub_Import.zip" -DestinationPath "." -Force
+          # Apply the maintained original-project UI source after extraction; no SUMO code is used.
+          Copy-Item -LiteralPath "main_window.py" -Destination "TrafficSignalStudio/app/ui/main_window.py" -Force
+          Copy-Item -LiteralPath "microsim.py" -Destination "TrafficSignalStudio/app/simulation/microsim.py" -Force
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,8 +38,15 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONPATH = "TrafficSignalStudio"
+          Copy-Item -LiteralPath "test_microsim.py" -Destination "TrafficSignalStudio/tests/test_microsim.py" -Force
           python -m pytest -q TrafficSignalStudio/tests
 
+      - name: Compile modules and smoke-test application imports
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "TrafficSignalStudio"
+          python -m compileall -q TrafficSignalStudio/app
+          python -c "from app.ui.main_window import MainWindow; print('MainWindow import OK')"
 
       - name: Build EXE
         run: >
