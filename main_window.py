@@ -24,12 +24,13 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._build_map_tab(), "2ГИС / импорт")
         tabs.addTab(self._build_scheme_tab(), "Схема")
         tabs.addTab(self._build_signals_tab(), "Светофорная программа")
-        tabs.addTab(self._build_demand_tab(), "Транспортный поток")
-        tabs.addTab(self._build_results_tab(), "Результаты")
+        tabs.addTab(self._build_demand_tab(), "Упрощённая оценка (legacy)")
+        tabs.addTab(self._build_results_tab(), "Результаты упрощённой оценки")
         tabs.addTab(self._build_sumo_tab(), "SUMO — микросимуляция")
         self.tabs = tabs
         self.setCentralWidget(tabs)
-        self.statusBar().showMessage("Прототип: проверяйте доступность API и валидируйте расчёты перед инженерным применением.")
+        tabs.setCurrentIndex(5)
+        self.statusBar().showMessage("Основной движок микросимуляции: Eclipse SUMO. Проверьте сеть, потоки и контроллеры перед инженерным применением.")
 
     def _build_sumo_tab(self):
         w = QWidget(); outer = QVBoxLayout(w)
