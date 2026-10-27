@@ -52,3 +52,10 @@ def test_saturation_flow_limits_stop_line_discharges():
     high = run_microsimulation(MicroSimulationConfig(**base, saturation_flow_vehicles_per_hour=2400),
                                [60], [50], ["NS"])
     assert high.north_south.departed > low.north_south.departed
+
+
+def test_invalid_seed_and_non_finite_vehicle_parameters_are_rejected():
+    with pytest.raises(ValueError, match="от 1 до 999999"):
+        MicroSimulationConfig(100, 100, 0, 120, seed=0)
+    with pytest.raises(ValueError, match="конечным положительным"):
+        MicroSimulationConfig(100, 100, 0, 120, free_speed_kmh=float("nan"))
