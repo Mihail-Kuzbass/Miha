@@ -1,0 +1,26 @@
+name: SUMO Russian tools
+
+on:
+  push:
+    paths:
+      - "tools/sumo_ru/**"
+      - ".github/workflows/sumo-ru-tools.yml"
+  pull_request:
+    paths:
+      - "tools/sumo_ru/**"
+      - ".github/workflows/sumo-ru-tools.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check syntax
+        run: python -m py_compile tools/sumo_ru/audit_po.py tools/sumo_ru/apply_ru_overrides.py tools/sumo_ru/test_audit_po.py tools/sumo_ru/test_apply_ru_overrides.py
+      - name: Run unit tests
+        working-directory: tools/sumo_ru
+        run: python -m unittest -v
