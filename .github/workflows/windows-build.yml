@@ -18,6 +18,8 @@ jobs:
         shell: pwsh
         run: |
           Expand-Archive -LiteralPath "TrafficSignalStudio_GitHub_Import.zip" -DestinationPath "." -Force
+          # Apply the maintained original-project UI source after extraction; no SUMO code is used.
+          Copy-Item -LiteralPath "main_window.py" -Destination "TrafficSignalStudio/app/ui/main_window.py" -Force
 
       - name: Set up Python
         uses: actions/setup-python@v5
