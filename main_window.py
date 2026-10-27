@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 from app.editor.intersection_view import IntersectionView
 from app.signals.plan import Phase, SignalPlan
 from app.simulation.engine import SimulationConfig, run_simulation
+from app.simulation.microsim import MicroSimulationConfig, run_microsimulation
 from app.integrations.dgis import DGisClient, DGisError
 from app.settings import load_settings, save_settings
 from app.integrations.road_network import fetch_osm_roads, load_geojson, save_geojson, RoadNetworkError
@@ -269,6 +270,8 @@ class MainWindow(QMainWindow):
             self.phase_summary.setText(f"Фаз: {len(self.plan.phases)} · Расчётная длина цикла: {self.plan.cycle_seconds} с")
             if hasattr(self, "scheme"):
                 self.scheme.update()
+            if hasattr(self, "phase_axis_table"):
+                self._refresh_phase_axis_table()
             return True
         except Exception as e:
             self.phase_summary.setText("План не применён: исправьте значения в таблице.")
@@ -332,9 +335,23 @@ class MainWindow(QMainWindow):
         self.seed = QSpinBox(); self.seed.setRange(1,999999); self.seed.setValue(42)
         for label, widget in [("Поток Север—Юг",self.ns),("Поток Восток—Запад",self.ew),("Доля тяжёлых ТС",self.heavy),("Длительность",self.duration),("Насыщенная интенсивность",self.saturation),("Seed сценария",self.seed)]: f.addRow(label,widget)
         outer.addWidget(box)
-        note = QLabel("Агрегированная демонстрационная модель: потоки по двум осям. Повороты, пешеходы, погода и влияние тяжёлых ТС на динамику не моделируются.")
+        note = QLabel("Быстрый расчёт использует агрегированную очередь. Ниже доступна отдельная микросимуляция, в которой автомобили представлены индивидуально. Для каждой фазы требуется явно выбрать разрешённую группу подходов.")
         note.setWordWrap(True); outer.addWidget(note)
-        run = QPushButton("Запустить моделирование"); run.clicked.connect(self._run); outer.addWidget(run); outer.addStretch()
+        run = QPushButton("Запустить быстрый расчёт очередей"); run.clicked.connect(self._run); outer.addWidget(run)
+        phase_box = QGroupBox("Назначение разрешающего сигнала фазам для микросимуляции")
+        phase_layout = QVBoxLayout(phase_box)
+        phase_note = QLabel("Выберите одну конфликтующую группу на фазу. Назначение не выводится автоматически из названия фазы; проверьте его по реальной схеме контроллера.")
+        phase_note.setWordWrap(True); phase_layout.addWidget(phase_note)
+        self.phase_axis_table = QTableWidget(0, 2)
+        self.phase_axis_table.setHorizontalHeaderLabels(["Фаза", "Разрешённая группа"])
+        self.phase_axis_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.phase_axis_table.verticalHeader().setVisible(False)
+        phase_layout.addWidget(self.phase_axis_table)
+        outer.addWidget(phase_box)
+        micro_run = QPushButton("Запустить микросимуляцию отдельных автомобилей")
+        micro_run.clicked.connect(self._run_microsimulation); outer.addWidget(micro_run)
+        outer.addStretch()
+        self._refresh_phase_axis_table()
         return w
 
     def _build_results_tab(self):
@@ -349,3 +366,54 @@ class MainWindow(QMainWindow):
         result = run_simulation(cfg, self.plan)
         self.results_text.setPlainText(result.to_report())
         self.tabs.setCurrentIndex(4)
+
+    def _refresh_phase_axis_table(self):
+        if not hasattr(self, "phase_axis_table"):
+            return
+        previous = []
+        for row in range(self.phase_axis_table.rowCount()):
+            combo = self.phase_axis_table.cellWidget(row, 1)
+            previous.append(combo.currentData() if combo else None)
+        self.phase_axis_table.setRowCount(len(self.plan.phases))
+        for row, phase in enumerate(self.plan.phases):
+            self.phase_axis_table.setItem(row, 0, QTableWidgetItem(f"{row + 1}. {phase.name}"))
+            combo = QComboBox()
+            combo.addItem("Север—Юг", "NS")
+            combo.addItem("Восток—Запад", "EW")
+            desired = previous[row] if row < len(previous) else ("NS" if row % 2 == 0 else "EW")
+            combo.setCurrentIndex(0 if desired == "NS" else 1)
+            self.phase_axis_table.setCellWidget(row, 1, combo)
+
+    def _run_microsimulation(self):
+        if not self._apply_phases():
+            return
+        if not hasattr(self, "phase_axis_table") or self.phase_axis_table.rowCount() != len(self.plan.phases):
+            QMessageBox.warning(self, "Назначение фаз", "Проверьте назначения направлений для всех фаз.")
+            return
+        try:
+            config = MicroSimulationConfig(
+                north_south_vehicles_per_hour=self.ns.value(),
+                east_west_vehicles_per_hour=self.ew.value(),
+                heavy_vehicle_percent=self.heavy.value(),
+                duration_seconds=self.duration.value(),
+                saturation_flow_vehicles_per_hour=self.saturation.value(),
+                seed=self.seed.value(),
+            )
+            durations = []
+            greens = []
+            axes = []
+            for row, phase in enumerate(self.plan.phases):
+                durations.append(
+                    phase.green_seconds + phase.flashing_green_seconds + phase.yellow_seconds
+                    + phase.red_seconds + phase.intergreen_seconds
+                )
+                greens.append(phase.green_seconds + phase.flashing_green_seconds)
+                combo = self.phase_axis_table.cellWidget(row, 1)
+                if combo is None:
+                    raise ValueError(f"Для фазы {row + 1} не задано направление.")
+                axes.append(combo.currentData())
+            result = run_microsimulation(config, durations, greens, axes)
+            self.results_text.setPlainText(result.to_report())
+            self.tabs.setCurrentIndex(4)
+        except (ValueError, ArithmeticError) as exc:
+            QMessageBox.warning(self, "Ошибка микросимуляции", str(exc))
