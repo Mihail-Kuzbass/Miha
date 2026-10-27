@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from math import hypot
+from math import hypot, isfinite
 from typing import Iterable
 
 MOVEMENTS = frozenset({"straight", "left", "right", "u_turn"})
@@ -20,10 +20,9 @@ class Point:
     y: float
 
     def __post_init__(self) -> None:
-        if not (self.x == self.x and self.y == self.y):
-            raise ValueError("Координаты должны быть конечными числами.")
-        if abs(self.x) == float("inf") or abs(self.y) == float("inf"):
-            raise ValueError("Координаты должны быть конечными числами.")
+        for value in (self.x, self.y):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
+                raise ValueError("Координаты должны быть конечными числами.")
 
 
 @dataclass(frozen=True)
@@ -37,10 +36,13 @@ class Lane:
     )
 
     def __post_init__(self) -> None:
-        if not self.lane_id.strip() or not self.road_id.strip() or not self.approach.strip():
+        if any(not isinstance(value, str) or not value.strip()
+               for value in (self.lane_id, self.road_id, self.approach)):
             raise ValueError("У полосы должны быть заданы ID дороги, ID полосы и подход.")
         if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
             raise ValueError("Индекс полосы должен быть неотрицательным целым числом.")
+        if any(not isinstance(value, str) for value in self.allowed_movements):
+            raise ValueError("Разрешённые манёвры должны быть строковыми значениями.")
         unknown = set(self.allowed_movements) - MOVEMENTS
         if unknown:
             raise ValueError(f"Неизвестные манёвры: {', '.join(sorted(unknown))}.")
@@ -54,12 +56,18 @@ class LaneConnection:
     geometry: tuple[Point, ...]
 
     def __post_init__(self) -> None:
-        if self.movement not in MOVEMENTS:
+        if not isinstance(self.from_lane, str) or not self.from_lane.strip():
+            raise ValueError("Не задана исходная полоса соединения.")
+        if not isinstance(self.to_lane, str) or not self.to_lane.strip():
+            raise ValueError("Не задана целевая полоса соединения.")
+        if not isinstance(self.movement, str) or self.movement not in MOVEMENTS:
             raise ValueError(f"Неизвестный манёвр: {self.movement}.")
         if self.from_lane == self.to_lane:
             raise ValueError("Соединение полосы с самой собой не допускается.")
         if len(self.geometry) < 2:
             raise ValueError("Траектория соединения должна содержать минимум две точки.")
+        if any(not isinstance(point, Point) for point in self.geometry):
+            raise ValueError("Траектория должна состоять из объектов Point.")
 
 
 @dataclass(frozen=True)
@@ -206,7 +214,7 @@ class LaneRouteGraph:
                     index=item["index"],
                     allowed_movements=frozenset(movements),
                 ))
-            except (KeyError, TypeError) as exc:
+            except (KeyError, TypeError, AttributeError) as exc:
                 raise ValueError(f"Некорректные данные полосы {index}: {exc}.") from exc
         graph = cls(lanes)
         for index, item in enumerate(connection_data, 1):
