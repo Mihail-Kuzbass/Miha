@@ -149,10 +149,10 @@ def run_microsimulation(config: MicroSimulationConfig, phase_durations: Sequence
     axes = {
         "NS": {"label": "Север—Юг", "demand": config.north_south_vehicles_per_hour,
                "vehicles": [], "arrived": 0, "departed": 0, "travel": [], "delay": [],
-               "speeds": [], "queues": [], "next_id": 1},
+               "speeds": [], "queues": [], "next_id": 1, "last_crossing_time": -3600.0},
         "EW": {"label": "Восток—Запад", "demand": config.east_west_vehicles_per_hour,
                "vehicles": [], "arrived": 0, "departed": 0, "travel": [], "delay": [],
-               "speeds": [], "queues": [], "next_id": 1},
+               "speeds": [], "queues": [], "next_id": 1, "last_crossing_time": -3600.0},
     }
     phase_ends = []
     total = 0
