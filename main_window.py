@@ -321,23 +321,6 @@ class MainWindow(QMainWindow):
         self.results_text.setPlaceholderText("Запустите моделирование на вкладке «Транспортный поток».")
         l.addWidget(self.results_text); return w
 
-    def _apply_phases(self):
-        try:
-            phases = []
-            for r, name in enumerate(["Север—Юг", "Восток—Запад"]):
-                green = int(self.phase_table.item(r,1).text())
-                yellow = int(self.phase_table.item(r,2).text())
-                intergreen = int(self.phase_table.item(r,3).text())
-                if green < 5 or yellow < 1 or intergreen < 0:
-                    raise ValueError("Зелёный ≥ 5 с, жёлтый ≥ 1 с, межфазный интервал ≥ 0.")
-                phases.append(Phase(name,green,yellow,intergreen))
-            self.plan = SignalPlan(phases)
-            self.phase_summary.setText(f"Расчётная длина цикла: {self.plan.cycle_seconds} с")
-            self.scheme.update()
-            return True
-        except Exception as e:
-            QMessageBox.warning(self, "Некорректный план", str(e)); return False
-
     def _run(self):
         if not self._apply_phases(): return
         cfg = SimulationConfig(self.ns.value(), self.ew.value(), self.heavy.value(),
