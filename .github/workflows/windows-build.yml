@@ -4,7 +4,7 @@ name: TrafficSignalStudio Windows Build
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, development/original-project-no-sumo]
   pull_request:
     branches: [main]
 
