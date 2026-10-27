@@ -25,6 +25,7 @@ jobs:
           Copy-Item "main_window.py" "TrafficSignalStudio/app/ui/main_window.py" -Force
           Copy-Item "sumo_engine.py" "TrafficSignalStudio/app/integrations/sumo_engine.py" -Force
           Copy-Item "test_sumo_engine.py" "TrafficSignalStudio/tests/test_sumo_engine.py" -Force
+          Copy-Item "README.md" "TrafficSignalStudio/README.md" -Force
 
       - name: Set up Python
         uses: actions/setup-python@v5
