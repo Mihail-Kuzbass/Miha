@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
     QPushButton, QFormLayout, QDoubleSpinBox, QSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QTextEdit, QGroupBox,
-    QLineEdit, QComboBox, QFileDialog, QAbstractItemView
+    QLineEdit, QComboBox, QFileDialog, QAbstractItemView, QCheckBox
 )
 from app.editor.intersection_view import IntersectionView
 from app.signals.plan import Phase, SignalPlan
@@ -10,6 +10,7 @@ from app.simulation.engine import SimulationConfig, run_simulation
 from app.integrations.dgis import DGisClient, DGisError
 from app.settings import load_settings, save_settings
 from app.integrations.road_network import fetch_osm_roads, load_geojson, save_geojson, RoadNetworkError
+from app.integrations.sumo_engine import (SumoError, convert_osm_to_network, generate_routes, inspect_traffic_lights, run_sumo)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -25,9 +26,175 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._build_signals_tab(), "Светофорная программа")
         tabs.addTab(self._build_demand_tab(), "Транспортный поток")
         tabs.addTab(self._build_results_tab(), "Результаты")
+        tabs.addTab(self._build_sumo_tab(), "SUMO — микросимуляция")
         self.tabs = tabs
         self.setCentralWidget(tabs)
         self.statusBar().showMessage("Прототип: проверяйте доступность API и валидируйте расчёты перед инженерным применением.")
+
+    def _build_sumo_tab(self):
+        w = QWidget(); outer = QVBoxLayout(w)
+        intro = QLabel(
+            "Основной вычислительный движок — Eclipse SUMO: отдельные автомобили, маршруты, "
+            "полосы, светофорные программы, очереди и задержки рассчитываются SUMO, а не "
+            "упрощённой двухпоточной моделью. SUMO устанавливается отдельно."
+        )
+        intro.setWordWrap(True); outer.addWidget(intro)
+        box = QGroupBox("Входные данные и параметры SUMO"); form = QFormLayout(box)
+        self.sumo_home_edit = QLineEdit(self.settings.get("sumo_home", ""))
+        self.sumo_osm_edit = QLineEdit()
+        self.sumo_network_edit = QLineEdit()
+        self.sumo_routes_edit = QLineEdit()
+        self.sumo_output_edit = QLineEdit("sumo_results")
+        self.sumo_duration = QSpinBox(); self.sumo_duration.setRange(60, 86400); self.sumo_duration.setValue(1800); self.sumo_duration.setSuffix(" с")
+        self.sumo_demand = QSpinBox(); self.sumo_demand.setRange(0, 100000); self.sumo_demand.setValue(900); self.sumo_demand.setSuffix(" авт./ч")
+        self.sumo_seed = QSpinBox(); self.sumo_seed.setRange(1, 2147483647); self.sumo_seed.setValue(42)
+        self.sumo_gui = QCheckBox("Открыть SUMO-GUI (если установлен)")
+        form.addRow("Каталог SUMO / SUMO_HOME", self._path_row(self.sumo_home_edit, "directory", "Выберите каталог SUMO"))
+        form.addRow("Исходный OSM XML/PBF", self._path_row(self.sumo_osm_edit, "open_osm", "Выберите файл OSM"))
+        form.addRow("Сеть SUMO (.net.xml)", self._path_row(self.sumo_network_edit, "open_net", "Выберите сеть SUMO"))
+        form.addRow("Маршруты SUMO (.rou.xml)", self._path_row(self.sumo_routes_edit, "open_rou", "Выберите маршруты SUMO"))
+        form.addRow("Папка результатов", self._path_row(self.sumo_output_edit, "directory", "Выберите папку результатов"))
+        form.addRow("Длительность моделирования", self.sumo_duration)
+        form.addRow("Суммарный спрос для генератора маршрутов", self.sumo_demand)
+        form.addRow("Seed", self.sumo_seed)
+        form.addRow("", self.sumo_gui)
+        outer.addWidget(box)
+        actions = QHBoxLayout()
+        convert = QPushButton("1. OSM → сеть SUMO"); convert.clicked.connect(self._sumo_convert_osm); actions.addWidget(convert)
+        routes = QPushButton("2. Сгенерировать маршруты"); routes.clicked.connect(self._sumo_generate_routes); actions.addWidget(routes)
+        inspect = QPushButton("Проверить светофоры сети"); inspect.clicked.connect(self._sumo_inspect_tls); actions.addWidget(inspect)
+        run = QPushButton("3. Запустить микросимуляцию"); run.clicked.connect(self._sumo_run); actions.addWidget(run)
+        outer.addLayout(actions)
+        self.sumo_output_text = QTextEdit(); self.sumo_output_text.setReadOnly(True)
+        self.sumo_output_text.setPlaceholderText("Здесь появятся состояние сети SUMO, параметры контроллеров и показатели микросимуляции.")
+        outer.addWidget(self.sumo_output_text, 1)
+        return w
+
+    def _path_row(self, edit, mode, title):
+        row = QWidget(); layout = QHBoxLayout(row); layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(edit, 1)
+        button = QPushButton("Обзор…")
+        button.clicked.connect(lambda: self._sumo_choose_path(edit, mode, title))
+        layout.addWidget(button)
+        return row
+
+    def _sumo_choose_path(self, edit, mode, title):
+        if mode == "directory":
+            value = QFileDialog.getExistingDirectory(self, title, edit.text().strip() or "")
+        elif mode == "open_osm":
+            value, _ = QFileDialog.getOpenFileName(self, title, edit.text().strip() or "", "OSM XML/PBF (*.osm *.xml *.pbf);;Все файлы (*)")
+        elif mode == "open_net":
+            value, _ = QFileDialog.getOpenFileName(self, title, edit.text().strip() or "", "SUMO network (*.net.xml *.xml);;Все файлы (*)")
+        else:
+            value, _ = QFileDialog.getOpenFileName(self, title, edit.text().strip() or "", "SUMO routes (*.rou.xml *.xml);;Все файлы (*)")
+        if value:
+            edit.setText(value)
+
+    def _sumo_settings(self):
+        home = self.sumo_home_edit.text().strip()
+        self.settings["sumo_home"] = home
+        save_settings(self.settings)
+        return home or None
+
+    def _sumo_convert_osm(self):
+        try:
+            source = self.sumo_osm_edit.text().strip()
+            target = self.sumo_network_edit.text().strip()
+            if not source:
+                raise ValueError("Выберите исходный файл OSM XML/PBF.")
+            if not target:
+                target, _ = QFileDialog.getSaveFileName(self, "Сохранить сеть SUMO", "network.net.xml", "SUMO network (*.net.xml)")
+                if not target: return
+                self.sumo_network_edit.setText(target)
+            self.sumo_output_text.setPlainText("Конвертация дорожной сети через netconvert…")
+            result = convert_osm_to_network(source, target, self._sumo_settings())
+            self.sumo_output_text.setPlainText(f"Сеть SUMO создана:\n{result}\n\nПроверьте геометрию, связи, ограничения поворотов и светофоры в netedit/SUMO-GUI перед анализом.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Ошибка конвертации SUMO", str(exc))
+            self.sumo_output_text.setPlainText(str(exc))
+
+    def _sumo_generate_routes(self):
+        try:
+            network = self.sumo_network_edit.text().strip()
+            target = self.sumo_routes_edit.text().strip()
+            if not network:
+                raise ValueError("Сначала выберите или создайте файл сети .net.xml.")
+            if not target:
+                target, _ = QFileDialog.getSaveFileName(self, "Сохранить маршруты SUMO", "routes.rou.xml", "SUMO routes (*.rou.xml)")
+                if not target: return
+                self.sumo_routes_edit.setText(target)
+            self.sumo_output_text.setPlainText("Генерация поездок через штатный randomTrips.py…")
+            result = generate_routes(network, target, self.sumo_duration.value(), self.sumo_demand.value(),
+                                     self.sumo_seed.value(), self._sumo_settings())
+            self.sumo_output_text.setPlainText(f"Маршруты созданы:\n{result}\n\nИнтенсивность задаётся как суммарный спрос генератора случайных поездок; это не распределение по подходам перекрёстка.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Ошибка генерации маршрутов", str(exc))
+            self.sumo_output_text.setPlainText(str(exc))
+
+    def _sumo_inspect_tls(self):
+        try:
+            network = self.sumo_network_edit.text().strip()
+            if not network:
+                raise ValueError("Выберите файл сети .net.xml.")
+            lights = inspect_traffic_lights(network)
+            if not lights:
+                text = "В сети не обнаружены программы tlLogic. Проверьте, что сеть содержит светофоры; при необходимости настройте их в netedit."
+            else:
+                lines = [f"Светофорных программ: {len(lights)}", ""]
+                for item in lights:
+                    lines.append(f"ID: {item['id']} | программа: {item['program_id']} | тип: {item['type']}")
+                    lines.append(f"Фаз: {item['phase_count']} | цикл: {item['cycle_seconds']:.1f} с")
+                    for index, state in enumerate(item["states"], 1):
+                        lines.append(f"  Фаза {index}: {state}")
+                    lines.append("")
+                text = "\n".join(lines)
+            self.sumo_output_text.setPlainText(text)
+        except Exception as exc:
+            QMessageBox.warning(self, "Ошибка чтения светофоров", str(exc))
+            self.sumo_output_text.setPlainText(str(exc))
+
+    def _sumo_run(self):
+        try:
+            network = self.sumo_network_edit.text().strip()
+            routes = self.sumo_routes_edit.text().strip()
+            if not network or not routes:
+                raise ValueError("Укажите файл сети .net.xml и файл маршрутов .rou.xml.")
+            self._sumo_settings()
+            output_dir = self.sumo_output_edit.text().strip() or "sumo_results"
+            self.sumo_output_text.setPlainText("SUMO выполняет микросимуляцию. При большой сети это может занять некоторое время…")
+            from PySide6.QtCore import QThread, Signal
+            class Worker(QThread):
+                completed = Signal(object, object)
+                def run(worker_self):
+                    try:
+                        result = run_sumo(network, routes, output_dir, self.sumo_duration.value(),
+                                          self.sumo_seed.value(), self.sumo_home_edit.text().strip() or None,
+                                          self.sumo_gui.isChecked())
+                        worker_self.completed.emit(result, None)
+                    except Exception as error:
+                        worker_self.completed.emit(None, str(error))
+            self.sumo_worker = Worker()
+            self.sumo_worker.completed.connect(self._sumo_show_result)
+            self.sumo_worker.start()
+        except Exception as exc:
+            QMessageBox.warning(self, "Не удалось запустить SUMO", str(exc))
+
+    def _sumo_show_result(self, result, error):
+        if error:
+            self.sumo_output_text.setPlainText(f"Ошибка микросимуляции:\n{error}")
+            QMessageBox.warning(self, "Ошибка SUMO", error)
+            return
+        self.sumo_output_text.setPlainText(
+            "ОТЧЁТ МИКРОСИМУЛЯЦИИ — ECLIPSE SUMO\n\n"
+            f"Длительность: {result['duration_seconds']} с\nSeed: {result['seed']}\n"
+            f"Вставлено/учтено поездок: {result['departed']}\nЗавершено поездок: {result['arrived']}\n"
+            f"Средняя длительность поездки: {result['average_trip_duration_s']:.2f} с\n"
+            f"Среднее время ожидания: {result['average_waiting_time_s']:.2f} с\n"
+            f"Средняя потеря времени: {result['average_time_loss_s']:.2f} с\n\n"
+            f"Tripinfo: {result['tripinfo_file']}\nSummary: {result['summary_file']}\n\n"
+            "Показатели относятся к завершившим поездку автомобилям. Перед сравнением вариантов "
+            "проверьте качество сети, распределение маршрутов, параметры потоков и светофорные программы."
+        )
 
     def _build_map_tab(self):
         w = QWidget(); l = QVBoxLayout(w)
