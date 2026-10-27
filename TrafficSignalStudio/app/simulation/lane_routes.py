@@ -151,6 +151,93 @@ class LaneRouteGraph:
         connections.reverse()
         return Route(tuple(lane_ids), tuple(connections))
 
+    def to_dict(self) -> dict:
+        """Serialize the graph in a stable, versioned JSON-compatible format."""
+        return {
+            "schema_version": 1,
+            "lanes": [
+                {
+                    "lane_id": lane.lane_id,
+                    "road_id": lane.road_id,
+                    "approach": lane.approach,
+                    "index": lane.index,
+                    "allowed_movements": sorted(lane.allowed_movements),
+                }
+                for lane in self._lanes.values()
+            ],
+            "connections": [
+                {
+                    "from_lane": edge.from_lane,
+                    "to_lane": edge.to_lane,
+                    "movement": edge.movement,
+                    "geometry": [[point.x, point.y] for point in edge.geometry],
+                }
+                for edge in sorted(
+                    self.connections,
+                    key=lambda item: (item.from_lane, item.to_lane, item.movement),
+                )
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LaneRouteGraph":
+        """Load a graph without mutating any existing project or editor state."""
+        if not isinstance(data, dict):
+            raise ValueError("Дорожный граф должен быть JSON-объектом.")
+        version = data.get("schema_version")
+        if isinstance(version, bool) or version != 1:
+            raise ValueError(f"Неподдерживаемая версия графа полос: {version!r}.")
+        lane_data = data.get("lanes")
+        connection_data = data.get("connections")
+        if not isinstance(lane_data, list) or not isinstance(connection_data, list):
+            raise ValueError("Граф должен содержать списки lanes и connections.")
+        lanes = []
+        for index, item in enumerate(lane_data, 1):
+            if not isinstance(item, dict):
+                raise ValueError(f"Описание полосы {index} должно быть объектом.")
+            movements = item.get("allowed_movements", ["straight", "left", "right"])
+            if not isinstance(movements, list) or any(not isinstance(value, str) for value in movements):
+                raise ValueError(f"Список манёвров полосы {index} имеет неверный формат.")
+            try:
+                lanes.append(Lane(
+                    lane_id=item["lane_id"],
+                    road_id=item["road_id"],
+                    approach=item["approach"],
+                    index=item["index"],
+                    allowed_movements=frozenset(movements),
+                ))
+            except (KeyError, TypeError) as exc:
+                raise ValueError(f"Некорректные данные полосы {index}: {exc}.") from exc
+        graph = cls(lanes)
+        for index, item in enumerate(connection_data, 1):
+            if not isinstance(item, dict):
+                raise ValueError(f"Описание соединения {index} должно быть объектом.")
+            geometry_data = item.get("geometry")
+            if not isinstance(geometry_data, list):
+                raise ValueError(f"Траектория соединения {index} должна быть списком точек.")
+            points = []
+            for point_index, pair in enumerate(geometry_data, 1):
+                if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                    raise ValueError(
+                        f"Точка {point_index} соединения {index} должна содержать координаты X и Y."
+                    )
+                if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in pair):
+                    raise ValueError(f"Координаты точки {point_index} должны быть числами.")
+                points.append(Point(float(pair[0]), float(pair[1])))
+            try:
+                graph.connect(LaneConnection(
+                    from_lane=item["from_lane"],
+                    to_lane=item["to_lane"],
+                    movement=item["movement"],
+                    geometry=tuple(points),
+                ))
+            except (KeyError, TypeError) as exc:
+                raise ValueError(f"Некорректные данные соединения {index}: {exc}.") from exc
+        errors = graph.validate()
+        if errors:
+            raise ValueError("Ошибки структуры дорожного графа: " + "; ".join(errors))
+        return graph
+
     def validate(self) -> list[str]:
         """Return structural errors without changing the graph."""
         errors: list[str] = []
