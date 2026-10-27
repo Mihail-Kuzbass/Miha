@@ -160,17 +160,18 @@ class MainWindow(QMainWindow):
             routes = self.sumo_routes_edit.text().strip()
             if not network or not routes:
                 raise ValueError("Укажите файл сети .net.xml и файл маршрутов .rou.xml.")
-            self._sumo_settings()
+            sumo_home = self._sumo_settings()
             output_dir = self.sumo_output_edit.text().strip() or "sumo_results"
+            duration = self.sumo_duration.value()
+            seed = self.sumo_seed.value()
+            use_gui = self.sumo_gui.isChecked()
             self.sumo_output_text.setPlainText("SUMO выполняет микросимуляцию. При большой сети это может занять некоторое время…")
             from PySide6.QtCore import QThread, Signal
             class Worker(QThread):
                 completed = Signal(object, object)
                 def run(worker_self):
                     try:
-                        result = run_sumo(network, routes, output_dir, self.sumo_duration.value(),
-                                          self.sumo_seed.value(), self.sumo_home_edit.text().strip() or None,
-                                          self.sumo_gui.isChecked())
+                        result = run_sumo(network, routes, output_dir, duration, seed, sumo_home, use_gui)
                         worker_self.completed.emit(result, None)
                     except Exception as error:
                         worker_self.completed.emit(None, str(error))
