@@ -1,10 +1,9 @@
-
 name: TrafficSignalStudio Windows Build
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/sumo-integration]
 
 jobs:
   build:
@@ -28,13 +27,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r TrafficSignalStudio/requirements.txt
-          
+          python -m pip install pytest
+
       - name: Run tests
         shell: pwsh
         run: |
           $env:PYTHONPATH = "TrafficSignalStudio"
+          python -m compileall -q TrafficSignalStudio/app TrafficSignalStudio/tests
           python -m pytest -q TrafficSignalStudio/tests
-
 
       - name: Build EXE
         run: >
