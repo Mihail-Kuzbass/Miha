@@ -87,3 +87,16 @@ def test_graph_loader_rejects_unknown_schema_and_missing_lane_reference():
     }
     with pytest.raises(ValueError, match="не найдена"):
         LaneRouteGraph.from_dict(malformed)
+
+
+def test_graph_loader_rejects_non_numeric_and_boolean_coordinates():
+    malformed = {
+        "schema_version": 1,
+        "lanes": [{"lane_id": "a", "road_id": "r", "approach": "north", "index": 0}],
+        "connections": [{
+            "from_lane": "a", "to_lane": "a-out", "movement": "straight",
+            "geometry": [[False, 0], [1, 1]],
+        }],
+    }
+    with pytest.raises(ValueError, match="должны быть числами"):
+        LaneRouteGraph.from_dict(malformed)
