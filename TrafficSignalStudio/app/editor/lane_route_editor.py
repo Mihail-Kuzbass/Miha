@@ -5,7 +5,7 @@ import json
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox, QGroupBox,
+    QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox, QGroupBox, QAbstractItemView,
 )
 from app.simulation.lane_routes import Lane, LaneConnection, LaneRouteGraph, Point
 
