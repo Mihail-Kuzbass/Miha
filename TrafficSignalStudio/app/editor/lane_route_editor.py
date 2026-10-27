@@ -183,26 +183,29 @@ class LaneRouteEditor(QWidget):
         try:
             with open(path, "r", encoding="utf-8") as stream:
                 loaded = LaneRouteGraph.from_dict(json.load(stream))
-            # Populate the UI only after the entire file has passed validation.
-            self.lanes.setRowCount(0)
-            for lane in loaded.lanes.values():
-                row = self.lanes.rowCount()
-                self.lanes.insertRow(row)
-                values = [
-                    lane.lane_id, lane.road_id, lane.approach, str(lane.index),
-                    ",".join(sorted(lane.allowed_movements)),
-                ]
-                for column, value in enumerate(values):
-                    self.lanes.setItem(row, column, QTableWidgetItem(value))
-            self.connections.setRowCount(0)
-            for edge in loaded.connections:
-                row = self.connections.rowCount()
-                self.connections.insertRow(row)
-                geometry = "; ".join(f"{point.x:g},{point.y:g}" for point in edge.geometry)
-                values = [edge.from_lane, edge.to_lane, edge.movement, geometry]
-                for column, value in enumerate(values):
-                    self.connections.setItem(row, column, QTableWidgetItem(value))
-            self.graph = loaded
+            self.set_graph(loaded)
             self.status.setText(f"Загружен граф: полос — {len(loaded.lanes)}, соединений — {len(loaded.connections)}.")
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             QMessageBox.warning(self, "Ошибка загрузки графа", str(exc))
+
+    def set_graph(self, loaded: LaneRouteGraph) -> None:
+        """Replace editor contents from an already validated graph."""
+        self.lanes.setRowCount(0)
+        for lane in loaded.lanes.values():
+            row = self.lanes.rowCount()
+            self.lanes.insertRow(row)
+            values = [
+                lane.lane_id, lane.road_id, lane.approach, str(lane.index),
+                ",".join(sorted(lane.allowed_movements)),
+            ]
+            for column, value in enumerate(values):
+                self.lanes.setItem(row, column, QTableWidgetItem(value))
+        self.connections.setRowCount(0)
+        for edge in loaded.connections:
+            row = self.connections.rowCount()
+            self.connections.insertRow(row)
+            geometry = "; ".join(f"{point.x:g},{point.y:g}" for point in edge.geometry)
+            values = [edge.from_lane, edge.to_lane, edge.movement, geometry]
+            for column, value in enumerate(values):
+                self.connections.setItem(row, column, QTableWidgetItem(value))
+        self.graph = loaded
