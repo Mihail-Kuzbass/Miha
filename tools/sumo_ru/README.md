@@ -22,6 +22,18 @@ python -m unittest discover -s tools/sumo_ru -p "test_*.py" -v
 
 The audit counts an entry as incomplete if its singular translation or any plural form is empty. The report lists source message IDs that need human translation review; it does not machine-translate them or overwrite upstream translation files.
 
+## Fill currently empty GUI translations
+
+The current upstream Russian GUI catalog was checked against Eclipse SUMO's `data/po/ru_gui.po`. The checked revision contains 3,806 translatable entries, with 64 entries having empty translations. This count can change as upstream develops.
+
+A starter set of Russian translations for those empty entries is included in `apply_ru_overrides.py`. It only fills empty `msgstr` fields and preserves non-empty translations. The script writes to a new file by default:
+
+```powershell
+python tools/sumo_ru/apply_ru_overrides.py C:\path\to\sumo\data\po\ru_gui.po C:\path\to\ru_gui.patched.po
+```
+
+Review the generated file before replacing the original catalog. Some entries are technical labels or fragments and should be checked in the actual GUI context. If upstream message IDs have changed, the script reports source IDs it could not find. The script is a local aid; it does not directly modify Eclipse's upstream repository.
+
 ## Completing the native interface translation
 
 SUMO uses gettext PO files and compiles them into MO catalogs. Its official translation workflow is documented at https://eclipse.dev/sumo/docs/Developer/Translating.html. Translation files should be reviewed in Weblate/upstream workflow to avoid losing updates. After updating PO files, build/compile the catalogs using the upstream i18n tooling and test the GUI, Netedit, CLI, and Python tools with `--language ru`.
