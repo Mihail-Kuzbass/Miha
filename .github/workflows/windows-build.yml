@@ -1,10 +1,9 @@
-
 name: TrafficSignalStudio Windows Build
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/sumo-integration]
 
 jobs:
   build:
@@ -19,6 +18,17 @@ jobs:
         run: |
           Expand-Archive -LiteralPath "TrafficSignalStudio_GitHub_Import.zip" -DestinationPath "." -Force
 
+      - name: Apply SUMO-first application sources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "TrafficSignalStudio/app/integrations" | Out-Null
+          Copy-Item "main_window.py" "TrafficSignalStudio/app/ui/main_window.py" -Force
+          Copy-Item "intersection_view.py" "TrafficSignalStudio/app/editor/intersection_view.py" -Force
+          Copy-Item "signal_plan.py" "TrafficSignalStudio/app/signals/plan.py" -Force
+          Copy-Item "sumo_engine.py" "TrafficSignalStudio/app/integrations/sumo_engine.py" -Force
+          Copy-Item "test_sumo_engine.py" "TrafficSignalStudio/tests/test_sumo_engine.py" -Force
+          Copy-Item "README.md" "TrafficSignalStudio/README.md" -Force
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -28,13 +38,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r TrafficSignalStudio/requirements.txt
-          
+          python -m pip install pytest
+
       - name: Run tests
         shell: pwsh
         run: |
           $env:PYTHONPATH = "TrafficSignalStudio"
+          python -m compileall -q TrafficSignalStudio/app TrafficSignalStudio/tests
           python -m pytest -q TrafficSignalStudio/tests
-
 
       - name: Build EXE
         run: >
