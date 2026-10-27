@@ -96,14 +96,14 @@ def generate_routes(
     seed: int = 42,
     sumo_home: str | None = None,
 ) -> str:
-    network = Path(network_file).expanduser().resolve()
-    target = Path(output_routes).expanduser().resolve()
-    if not network.is_file():
-        raise FileNotFoundError(f"Файл сети SUMO не найден: {network}")
     if duration_seconds <= 0:
         raise ValueError("Длительность должна быть положительной.")
     if demand_vph < 0:
         raise ValueError("Интенсивность не может быть отрицательной.")
+    network = Path(network_file).expanduser().resolve()
+    target = Path(output_routes).expanduser().resolve()
+    if not network.is_file():
+        raise FileNotFoundError(f"Файл сети SUMO не найден: {network}")
     tools = discover_sumo(sumo_home)
     trips_script = tools.get("randomTrips.py")
     if not trips_script:
