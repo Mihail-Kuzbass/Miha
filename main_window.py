@@ -9,6 +9,7 @@ from app.editor.lane_route_editor import LaneRouteEditor
 from app.signals.plan import Phase, SignalPlan
 from app.simulation.engine import SimulationConfig, run_simulation
 from app.simulation.microsim import MicroSimulationConfig, run_microsimulation
+from app.simulation.lane_routes import LaneRouteGraph
 from app.integrations.dgis import DGisClient, DGisError
 from app.settings import load_settings, save_settings
 from app.integrations.road_network import fetch_osm_roads, load_geojson, save_geojson, RoadNetworkError
@@ -51,6 +52,11 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._build_results_tab(), "Результаты")
         self.tabs = tabs
         self.setCentralWidget(tabs)
+        project_menu = self.menuBar().addMenu("Проект")
+        save_project_action = project_menu.addAction("Сохранить проект…")
+        save_project_action.triggered.connect(self._save_project)
+        load_project_action = project_menu.addAction("Открыть проект…")
+        load_project_action.triggered.connect(self._load_project)
         self.statusBar().showMessage("Прототип: проверяйте доступность API и валидируйте расчёты перед инженерным применением.")
 
     def _build_map_tab(self):
@@ -420,3 +426,107 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(4)
         except (ValueError, ArithmeticError) as exc:
             QMessageBox.warning(self, "Ошибка микросимуляции", str(exc))
+
+    def _save_project(self):
+        import json
+        if not self._apply_phases():
+            return
+        try:
+            lane_graph = self.route_editor._graph_from_tables()
+            self.route_editor.graph = lane_graph
+            phases = [
+                {
+                    "name": phase.name,
+                    "green_seconds": phase.green_seconds,
+                    "flashing_green_seconds": phase.flashing_green_seconds,
+                    "yellow_seconds": phase.yellow_seconds,
+                    "red_seconds": phase.red_seconds,
+                    "intergreen_seconds": phase.intergreen_seconds,
+                }
+                for phase in self.plan.phases
+            ]
+            data = {
+                "project_format": "TrafficSignalStudio",
+                "schema_version": 1,
+                "lane_counts": {key: spin.value() for key, spin in self.lane_spins.items()},
+                "signal_plan": phases,
+                "lane_graph": lane_graph.to_dict(),
+                "scenario": {
+                    "north_south_vehicles_per_hour": self.ns.value(),
+                    "east_west_vehicles_per_hour": self.ew.value(),
+                    "heavy_vehicle_percent": self.heavy.value(),
+                    "duration_seconds": self.duration.value(),
+                    "saturation_flow_vehicles_per_hour": self.saturation.value(),
+                    "seed": self.seed.value(),
+                },
+            }
+        except ValueError as exc:
+            QMessageBox.warning(self, "Проект не сохранён", f"Проверьте граф полос и маршрутов.\n{exc}")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Сохранить проект TrafficSignalStudio", "traffic_project.json", "Проект JSON (*.json)")
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        try:
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, ensure_ascii=False, indent=2)
+            self.statusBar().showMessage(f"Проект сохранён: {path}", 5000)
+        except OSError as exc:
+            QMessageBox.critical(self, "Ошибка сохранения проекта", str(exc))
+
+    def _load_project(self):
+        import json
+        path, _ = QFileDialog.getOpenFileName(self, "Открыть проект TrafficSignalStudio", "", "Проект JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as stream:
+                data = json.load(stream)
+            if not isinstance(data, dict) or data.get("project_format") != "TrafficSignalStudio":
+                raise ValueError("Файл не является проектом TrafficSignalStudio.")
+            version = data.get("schema_version")
+            if isinstance(version, bool) or version != 1:
+                raise ValueError(f"Неподдерживаемая версия проекта: {version!r}.")
+            lane_counts = _validated_lane_counts(data, self.lane_spins.keys())
+
+            phase_data = data.get("signal_plan")
+            if not isinstance(phase_data, list) or not 1 <= len(phase_data) <= 32:
+                raise ValueError("Светофорный план должен содержать от 1 до 32 фаз.")
+            phases = []
+            for index, item in enumerate(phase_data, 1):
+                if not isinstance(item, dict):
+                    raise ValueError(f"Фаза {index} должна быть объектом.")
+                phases.append(Phase(
+                    item["name"], item["green_seconds"], item["yellow_seconds"],
+                    item["intergreen_seconds"], item.get("flashing_green_seconds", 0),
+                    item.get("red_seconds", 0),
+                ))
+            candidate_plan = SignalPlan(phases)
+
+            scenario_data = data.get("scenario")
+            if not isinstance(scenario_data, dict):
+                raise ValueError("В проекте отсутствуют параметры сценария.")
+            candidate_config = MicroSimulationConfig(**scenario_data)
+            lane_graph = LaneRouteGraph.from_dict(data.get("lane_graph", {
+                "schema_version": 1, "lanes": [], "connections": [],
+            }))
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "Ошибка загрузки проекта", str(exc))
+            return
+
+        # Commit UI changes only after the entire file has passed validation.
+        for approach, spin in self.lane_spins.items():
+            spin.setValue(lane_counts[approach])
+        self.plan = candidate_plan
+        self._populate_phase_table(self.plan.phases)
+        if not self._apply_phases():
+            return
+        self.route_editor.set_graph(lane_graph)
+        self.ns.setValue(candidate_config.north_south_vehicles_per_hour)
+        self.ew.setValue(candidate_config.east_west_vehicles_per_hour)
+        self.heavy.setValue(candidate_config.heavy_vehicle_percent)
+        self.duration.setValue(candidate_config.duration_seconds)
+        self.saturation.setValue(candidate_config.saturation_flow_vehicles_per_hour)
+        self.seed.setValue(candidate_config.seed)
+        self.statusBar().showMessage(f"Проект загружен: {path}", 5000)
