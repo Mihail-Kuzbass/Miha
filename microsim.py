@@ -183,7 +183,7 @@ def run_microsimulation(config: MicroSimulationConfig, phase_durations: Sequence
             departed_now = []
             leader_position = None
             for vehicle in vehicles:
-                permitted = active_axis == axis
+                permitted = active_axis == axis and (t - state["last_crossing_time"] >= 3600.0 / config.saturation_flow_vehicles_per_hour)
                 if vehicle.position_m >= 0:
                     target_speed = vehicle.max_speed_mps
                 else:
@@ -206,6 +206,8 @@ def run_microsimulation(config: MicroSimulationConfig, phase_durations: Sequence
                 if vehicle.position_m < 0 <= new_position and not permitted:
                     new_position = -0.05
                     vehicle.speed_mps = 0.0
+                elif vehicle.position_m < 0 <= new_position and permitted:
+                    state["last_crossing_time"] = t
                 vehicle.position_m = new_position
                 if vehicle.speed_mps < 0.5 and vehicle.position_m < 0:
                     vehicle.stop_delay_s += dt
