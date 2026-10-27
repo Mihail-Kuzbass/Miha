@@ -120,7 +120,7 @@ def apply(path: Path, output: Path) -> tuple[int, int]:
         # PO uses C-style double-quoted strings. Limit whitespace to horizontal
         # whitespace so the replacement cannot consume adjacent lines.
         encoded = json.dumps(translated, ensure_ascii=False)
-        updated, count = re.subn(r'(?m)^([ \t]*)msgstr ""[ \t]*
+        updated, count = re.subn(r'(?m)^([ \t]*)msgstr ""[ \t]*$', lambda m: m.group(1) + "msgstr " + encoded, block, count=1)
         if count:
             blocks[index] = updated
             applied += 1
