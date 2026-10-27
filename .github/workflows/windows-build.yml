@@ -22,6 +22,7 @@ jobs:
           Expand-Archive -LiteralPath "TrafficSignalStudio_GitHub_Import.zip" -DestinationPath "." -Force
           # Apply the maintained original-project UI source after extraction; no SUMO code is used.
           Copy-Item -LiteralPath "main_window.py" -Destination "TrafficSignalStudio/app/ui/main_window.py" -Force
+          Copy-Item -LiteralPath "microsim.py" -Destination "TrafficSignalStudio/app/simulation/microsim.py" -Force
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,6 +38,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONPATH = "TrafficSignalStudio"
+          Copy-Item -LiteralPath "test_microsim.py" -Destination "TrafficSignalStudio/tests/test_microsim.py" -Force
           python -m pytest -q TrafficSignalStudio/tests
 
 
