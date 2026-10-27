@@ -11,6 +11,26 @@ from app.integrations.dgis import DGisClient, DGisError
 from app.settings import load_settings, save_settings
 from app.integrations.road_network import fetch_osm_roads, load_geojson, save_geojson, RoadNetworkError
 
+def _validated_lane_counts(data, approaches):
+    """Validate a saved intersection before changing any live editor controls."""
+    if not isinstance(data, dict):
+        raise ValueError("Файл схемы должен содержать JSON-объект.")
+    version = data.get("schema_version", 1)
+    if isinstance(version, bool) or version != 1:
+        raise ValueError(f"Неподдерживаемая версия схемы: {version!r}.")
+    counts = data.get("lane_counts")
+    if not isinstance(counts, dict):
+        raise ValueError("В файле отсутствует объект lane_counts.")
+    validated = {}
+    for approach in approaches:
+        value = counts.get(approach, 2)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"Число полос для направления «{approach}» должно быть целым числом.")
+        if not 1 <= value <= 8:
+            raise ValueError(f"Число полос для направления «{approach}» должно быть от 1 до 8.")
+        validated[approach] = value
+    return validated
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -295,9 +315,10 @@ class MainWindow(QMainWindow):
         try:
             with open(path, "r", encoding="utf-8") as stream:
                 data = json.load(stream)
-            counts = data["lane_counts"]
+            counts = _validated_lane_counts(data, self.lane_spins.keys())
+            # Apply only after the whole file passed validation (no partial changes).
             for approach, spin in self.lane_spins.items():
-                spin.setValue(int(counts.get(approach, 2)))
+                spin.setValue(counts[approach])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             QMessageBox.warning(self, "Ошибка загрузки схемы", str(exc))
 
