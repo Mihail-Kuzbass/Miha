@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Check syntax
-        run: python -m py_compile tools/sumo_ru/audit_po.py tools/sumo_ru/test_audit_po.py
+        run: python -m py_compile tools/sumo_ru/audit_po.py tools/sumo_ru/apply_ru_overrides.py tools/sumo_ru/test_audit_po.py tools/sumo_ru/test_apply_ru_overrides.py
       - name: Run unit tests
         working-directory: tools/sumo_ru
         run: python -m unittest -v
