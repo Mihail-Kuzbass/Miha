@@ -43,3 +43,12 @@ def test_vehicle_demand_is_respected_and_metrics_are_bounded():
     assert result.north_south.max_queue_vehicles >= 0
     assert result.east_west.mean_speed_kmh >= 0
     assert result.north_south.remaining >= 0
+
+def test_saturation_flow_limits_stop_line_discharges():
+    base = dict(north_south_vehicles_per_hour=3000, east_west_vehicles_per_hour=0,
+                heavy_vehicle_percent=0, duration_seconds=600, seed=17)
+    low = run_microsimulation(MicroSimulationConfig(**base, saturation_flow_vehicles_per_hour=900),
+                              [60], [50], ["NS"])
+    high = run_microsimulation(MicroSimulationConfig(**base, saturation_flow_vehicles_per_hour=2400),
+                               [60], [50], ["NS"])
+    assert high.north_south.departed > low.north_south.departed
