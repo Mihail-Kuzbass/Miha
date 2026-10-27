@@ -63,3 +63,27 @@ def test_shortest_route_is_deterministic():
     graph.connect(connection("b", "d"))
     graph.connect(connection("c", "d"))
     assert graph.route("a", "d").lane_ids == ("a", "b", "d")
+
+
+def test_graph_serialization_round_trip_is_stable():
+    graph = LaneRouteGraph([lane("a", "north", movements=("straight", "left")), lane("b", "east")])
+    graph.connect(connection("a", "b", "left", ((0, 0), (2, 3), (5, 5))))
+    encoded = graph.to_dict()
+    restored = LaneRouteGraph.from_dict(encoded)
+    assert restored.to_dict() == encoded
+    assert restored.route("a", "b").length == pytest.approx(graph.route("a", "b").length)
+
+
+def test_graph_loader_rejects_unknown_schema_and_missing_lane_reference():
+    with pytest.raises(ValueError, match="Неподдерживаемая версия"):
+        LaneRouteGraph.from_dict({"schema_version": 2, "lanes": [], "connections": []})
+    malformed = {
+        "schema_version": 1,
+        "lanes": [{"lane_id": "a", "road_id": "r", "approach": "north", "index": 0}],
+        "connections": [{
+            "from_lane": "a", "to_lane": "missing", "movement": "straight",
+            "geometry": [[0, 0], [1, 1]],
+        }],
+    }
+    with pytest.raises(ValueError, match="не найдена"):
+        LaneRouteGraph.from_dict(malformed)
