@@ -9,7 +9,7 @@ standards-certified traffic model.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp
+from math import exp, isfinite
 import random
 from typing import Sequence
 
@@ -34,18 +34,21 @@ class MicroSimulationConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 5000:
                 raise ValueError(f"{name}: интенсивность должна быть целым числом от 0 до 5000.")
-        if not 0 <= self.heavy_vehicle_percent <= 100:
-            raise ValueError("Доля тяжёлых транспортных средств должна быть от 0 до 100%.")
-        if not 60 <= self.duration_seconds <= 7200:
-            raise ValueError("Длительность моделирования должна быть от 60 до 7200 секунд.")
+        if isinstance(self.heavy_vehicle_percent, bool) or not isinstance(self.heavy_vehicle_percent, (int, float)) or not isfinite(self.heavy_vehicle_percent) or not 0 <= self.heavy_vehicle_percent <= 100:
+            raise ValueError("Доля тяжёлых транспортных средств должна быть конечным числом от 0 до 100%.")
+        if isinstance(self.duration_seconds, bool) or not isinstance(self.duration_seconds, int) or not 60 <= self.duration_seconds <= 7200:
+            raise ValueError("Длительность моделирования должна быть целым числом от 60 до 7200 секунд.")
         if not 900 <= self.saturation_flow_vehicles_per_hour <= 2400:
             raise ValueError("Насыщенная интенсивность должна быть от 900 до 2400 авт./ч.")
-        if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
-            raise ValueError("Seed должен быть неотрицательным целым числом.")
-        if self.free_speed_kmh <= 0 or self.acceleration_mps2 <= 0 or self.comfortable_deceleration_mps2 <= 0:
-            raise ValueError("Скорость, ускорение и замедление должны быть положительными.")
-        if self.vehicle_gap_m < 2 or self.approach_length_m < 30 or self.time_step_seconds <= 0:
-            raise ValueError("Некорректные параметры геометрии или шага времени.")
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int) or not 1 <= self.seed <= 999999:
+            raise ValueError("Seed должен быть целым числом от 1 до 999999.")
+        for name in ("free_speed_kmh", "acceleration_mps2", "comfortable_deceleration_mps2",
+                     "vehicle_gap_m", "approach_length_m", "time_step_seconds"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value <= 0:
+                raise ValueError(f"Параметр {name} должен быть конечным положительным числом.")
+        if self.vehicle_gap_m < 2 or self.approach_length_m < 30:
+            raise ValueError("Дистанция между ТС должна быть не менее 2 м, длина подхода — не менее 30 м.")
 
 
 @dataclass
