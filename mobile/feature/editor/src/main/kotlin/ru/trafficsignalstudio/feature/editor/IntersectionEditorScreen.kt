@@ -1098,11 +1098,24 @@ private fun IntersectionGeometryPreview(
                     -(markerAfter.yMeters - markerBefore.yMeters),
                     markerAfter.xMeters - markerBefore.xMeters
                 )).toFloat()
+                val nextIndex = (markerIndex + 1).coerceAtMost(trajectory.points.lastIndex)
+                val nextPoint = trajectory.points[nextIndex]
+                val articulationHeading = if (nextIndex > markerIndex) {
+                    Math.toDegrees(kotlin.math.atan2(
+                        -(nextPoint.yMeters - markerAfter.yMeters),
+                        nextPoint.xMeters - markerAfter.xMeters
+                    )).toFloat()
+                } else markerHeading
+                val articulationAngle = ((articulationHeading - markerHeading + 540f) % 360f - 180f)
+                    .coerceIn(-30f, 30f)
                 val markerCenter = Offset(
                     center.x + markerPoint.xMeters.toFloat() * scale * 0.35f,
                     center.y - markerPoint.yMeters.toFloat() * scale * 0.35f
                 )
-                drawVehicleGlyph(markerCenter, markerHeading, scale * 0.35f, vehicleModel)
+                drawVehicleGlyph(
+                    markerCenter, markerHeading, scale * 0.35f, vehicleModel,
+                    articulationAngleDegrees = articulationAngle
+                )
                 val before = trajectory.points[trajectory.points.lastIndex - 1]
                 val tip = trajectory.points.last()
                 val dx = (tip.xMeters - before.xMeters).toFloat()
