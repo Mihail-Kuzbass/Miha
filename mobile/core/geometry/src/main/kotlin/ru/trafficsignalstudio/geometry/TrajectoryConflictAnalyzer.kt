@@ -51,7 +51,8 @@ data class MovementTrajectory(
     val toApproachId: String,
     val toLaneId: String,
     val movementKind: MovementKind,
-    val points: List<Point2D>
+    val points: List<Point2D>,
+    val vehicleWidthMeters: Double = VehicleEnvelopeConflictAnalyzer.DEFAULT_VEHICLE_WIDTH_METERS
 )
 
 data class MovementTrajectoryConflict(
