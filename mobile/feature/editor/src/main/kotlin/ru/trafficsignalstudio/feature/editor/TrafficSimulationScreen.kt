@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
+import ru.trafficsignalstudio.geometry.SignalPlanTimingAnalyzer
 import ru.trafficsignalstudio.geometry.TrafficSimulationDemand
 import ru.trafficsignalstudio.geometry.TrafficSimulationEngine
 import ru.trafficsignalstudio.geometry.TrafficSimulationResult
@@ -72,6 +73,9 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
     var selectedSnapshotIndex by remember(intersection.id) { mutableStateOf(0) }
     var isPlaying by remember(intersection.id) { mutableStateOf(false) }
     var inputError by remember(intersection.id) { mutableStateOf<String?>(null) }
+    val timingReport = remember(intersection.id, intersection.signalPlan, intersection.laneConnections) {
+        SignalPlanTimingAnalyzer.analyze(intersection)
+    }
 
     fun updateForm(connectionId: String, form: MovementDemandForm) {
         forms = forms + (connectionId to form)
@@ -200,6 +204,12 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
 
         result?.let { simulation ->
             Text("Визуализация движения", style = MaterialTheme.typography.titleLarge)
+            SignalPhaseStatusCard(
+                intersection = intersection,
+                timeSeconds = simulation.snapshots.getOrNull(selectedSnapshotIndex)?.timeSeconds ?: 0.0,
+                cycleLengthSeconds = timingReport.cycleLengthSeconds,
+                phaseWindows = timingReport.phaseWindows
+            )
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     TrafficSimulationCanvas(intersection, simulation.snapshots.getOrNull(selectedSnapshotIndex))
@@ -249,6 +259,51 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
             simulation.diagnostics.forEach { Text("Предупреждение: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Text("Расчётная модель использует дискретный шаг, равномерный поток прибытий и фазовый выпуск с упрощённым интервалом обслуживания. Результаты предварительные: пока нет калибровки по фактическим наблюдениям, полноценного следования за лидером, пешеходов и адаптивного поведения водителей.",
                 style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun SignalPhaseStatusCard(
+    intersection: Intersection,
+    timeSeconds: Double,
+    cycleLengthSeconds: Int,
+    phaseWindows: List<ru.trafficsignalstudio.geometry.SignalPhaseWindow>
+) {
+    val plan = intersection.signalPlan
+    val cycleTime = if (cycleLengthSeconds > 0) timeSeconds % cycleLengthSeconds else 0.0
+    val window = phaseWindows.firstOrNull {
+        cycleTime >= it.startSeconds && cycleTime < it.allRedEndSeconds
+    }
+    val phase = window?.let { selected -> plan?.phases?.firstOrNull { it.id == selected.phaseId } }
+    val state = when {
+        phase == null -> "Нет активной фазы"
+        cycleTime < window!!.greenEndSeconds -> "Зелёный"
+        cycleTime < window.yellowEndSeconds -> "Жёлтый"
+        else -> "Общий красный"
+    }
+    val stateColor = when (state) {
+        "Зелёный" -> Color(0xFF43A047)
+        "Жёлтый" -> Color(0xFFFFB300)
+        "Общий красный" -> Color(0xFFE53935)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Текущее состояние светофора", style = MaterialTheme.typography.titleMedium)
+            Text(state, color = stateColor, style = MaterialTheme.typography.titleLarge)
+            Text(phase?.name ?: "План не содержит действующей фазы", style = MaterialTheme.typography.bodyMedium)
+            if (phase != null) {
+                Text(
+                    if (state == "Зелёный") "Разрешено движений: ${phase.greenConnectionIds.size}"
+                    else "Выпуск транспорта по этой фазе закрыт",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            if (cycleLengthSeconds > 0) {
+                Text("Положение в цикле: ${cycleTime.toInt()} / $cycleLengthSeconds с",
+                    style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }
