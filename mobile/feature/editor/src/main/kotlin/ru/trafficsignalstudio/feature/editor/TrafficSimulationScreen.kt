@@ -262,10 +262,9 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                     MetricLine("Проехало стоп-линию", "${simulation.totalDepartures} авт.")
                     MetricLine("Осталось в очередях и на подходах", "${simulation.totalQueueAtEnd} авт.")
                     MetricLine("Максимальная очередь", "${simulation.maximumQueueVehicles} авт.")
-                    MetricLine("Занято в пределах полос", "${simulation.physicalLaneVehiclesAtEnd} авт.")
-                    MetricLine("Ожидают за границей участка", "${simulation.upstreamQueueAtEnd} авт.")
-                    MetricLine("Заполнение полос к концу", "${"%.1f".format(simulation.laneStorageUtilizationPercent)} %")
-                    MetricLine("Максимальное заполнение полос", "${"%.1f".format(simulation.maximumLaneStorageUtilizationPercent)} %")
+                    MetricLine("Максимальная длина занятого подхода", "${"%.1f".format(simulation.maximumQueueLengthMeters)} м")
+                    MetricLine("Ожидают за границей участка", "${simulation.spillbackVehiclesAtEnd} авт.")
+                    MetricLine("Максимальный внешний затор", "${simulation.maximumSpillbackVehicles} авт.")
                     MetricLine("Средняя задержка", "${"%.1f".format(simulation.averageDelaySeconds)} с/авт.")
                     MetricLine("Пропуск за час (по факту)", "${"%.0f".format(simulation.throughputVehiclesPerHour)} авт./ч")
                     MetricLine("Суммарная задержка", "${"%.2f".format(simulation.totalDelayVehicleHours)} авт.-ч")
@@ -285,7 +284,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                     Text("Результаты по движениям", style = MaterialTheme.typography.titleMedium)
                     simulation.movementMetrics.forEachIndexed { index, metric ->
                         MetricLine("Движение ${index + 1}",
-                            "${metric.departures}/${metric.arrivals} · очередь ${metric.queueVehiclesAtEnd} · макс. ${metric.maximumQueueVehicles}")
+                            "${metric.departures}/${metric.arrivals} · ${metric.queueVehiclesAtEnd} авт. · длина ${"%.1f".format(metric.queueLengthMetersAtEnd)} м · внешний затор ${metric.spillbackVehiclesAtEnd}")
                     }
                 }
             }
