@@ -116,6 +116,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
     var result by remember(intersection.id) { mutableStateOf<TrafficSimulationResult?>(null) }
     var selectedSnapshotIndex by remember(intersection.id) { mutableStateOf(0) }
     var isPlaying by remember(intersection.id) { mutableStateOf(false) }
+    var zoomScale by remember(intersection.id) { mutableStateOf(1f) }
     var inputError by remember(intersection.id) { mutableStateOf<String?>(null) }
     val timingReport = remember(intersection.id, intersection.signalPlan, intersection.laneConnections) {
         SignalPlanTimingAnalyzer.analyze(intersection)
@@ -296,8 +297,14 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
             )
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TrafficSimulationCanvas(intersection, simulation.snapshots.getOrNull(selectedSnapshotIndex))
-                    Text("Линейный масштаб: 10 м", style = MaterialTheme.typography.labelSmall)
+                    TrafficSimulationCanvas(intersection, simulation.snapshots.getOrNull(selectedSnapshotIndex), zoomScale)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { zoomScale = (zoomScale / 1.25f).coerceAtLeast(0.5f) }) { Text("−") }
+                        Text("${(zoomScale * 100).toInt()}%", modifier = Modifier.alignByBaseline())
+                        OutlinedButton(onClick = { zoomScale = (zoomScale * 1.25f).coerceAtMost(4f) }) { Text("+") }
+                        OutlinedButton(onClick = { zoomScale = 1f }) { Text("Сброс") }
+                    }
+                    Text("Линейка 10 м · масштаб ${"%.0f".format(zoomScale * 100)}%", style = MaterialTheme.typography.labelSmall)
                     Text("Модельное время: ${simulation.snapshots.getOrNull(selectedSnapshotIndex)?.timeSeconds?.toInt() ?: 0} с")
                     Slider(
                         value = selectedSnapshotIndex.toFloat(),
@@ -312,6 +319,29 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 }
             }
             Text("Итоги моделирования", style = MaterialTheme.typography.titleLarge)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Оценка риска ДТП", style = MaterialTheme.typography.titleMedium)
+                    Text("${"%.1f".format(simulation.crashRiskPercent)}%", style = MaterialTheme.typography.headlineMedium,
+                        color = when (simulation.crashRiskBand) {
+                            ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> Color(0xFF43A047)
+                            ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> Color(0xFFFFA726)
+                            ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> Color(0xFFE53935)
+                        })
+                    Text(when (simulation.crashRiskBand) {
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> "0–10%: риск столкновения из-за несоблюдения дистанции"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> "10–40%: риск столкновения 2–3 автомобилей в конфликтной зоне"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> "40% и выше: риск группового ДТП на перекрёстке"
+                    }, style = MaterialTheme.typography.bodySmall)
+                    MetricLine("Геометрических конфликтов", "${simulation.crashIncidents.firstOrNull()?.affectedConnectionIds?.size ?: 0} затронуто движений")
+                    MetricLine("Смоделировано ДТП", "${simulation.crashIncidents.size}")
+                    MetricLine("Участников ДТП", "${simulation.crashIncidents.sumOf { it.participants }}")
+                    simulation.crashIncidents.forEach { incident ->
+                        MetricLine("ДТП ${incident.id}", "${incident.participants} ТС · ${incident.timeSeconds.toInt()} с · устранение через ${(incident.clearedAtSeconds - incident.timeSeconds).toInt()} с")
+                    }
+                    Text("Процент — сценарный индикатор риска по интенсивности и конфликтам траекторий, а не статистически откалиброванная вероятность для реальной улицы. Само ДТП в прогоне возникает случайно с учётом этого индикатора.", style = MaterialTheme.typography.labelSmall)
+                }
+            }
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     MetricLine("Поступило", "${simulation.totalArrivals} авт.")
@@ -408,7 +438,7 @@ private fun MetricLine(label: String, value: String) {
 }
 
 @Composable
-private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: TrafficSimulationSnapshot?) {
+private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: TrafficSimulationSnapshot?, zoomScale: Float) {
     val trajectories = remember(intersection.id, intersection.laneConnections) {
         TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection)
     }
@@ -444,7 +474,7 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
         val minY = allPoints.minOf { it.yMeters }; val maxY = allPoints.maxOf { it.yMeters }
         val spanX = (maxX - minX).coerceAtLeast(10.0)
         val spanY = (maxY - minY).coerceAtLeast(10.0)
-        val scale = minOf(size.width / spanX.toFloat(), size.height / spanY.toFloat()) * 0.78f
+        val scale = minOf(size.width / spanX.toFloat(), size.height / spanY.toFloat()) * 0.78f * zoomScale.coerceIn(0.5f, 4f)
         val origin = Offset(size.width / 2f - ((minX + maxX) / 2.0).toFloat() * scale,
             size.height / 2f + ((minY + maxY) / 2.0).toFloat() * scale)
         fun map(point: ru.trafficsignalstudio.model.Point2D) =
@@ -474,6 +504,12 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
         drawLine(Color(0xFF263238), rulerStart, rulerEnd, strokeWidth = 1.5f)
         drawLine(Color.White, Offset(rulerStart.x, rulerStart.y - 5f), Offset(rulerStart.x, rulerStart.y + 5f), strokeWidth = 2f)
         drawLine(Color.White, Offset(rulerEnd.x, rulerEnd.y - 5f), Offset(rulerEnd.x, rulerEnd.y + 5f), strokeWidth = 2f)
+        snapshot?.activeIncidents?.forEach { incident ->
+            val marker = map(incident.point)
+            drawCircle(Color(0xFFE53935), radius = 8f * zoomScale, center = marker)
+            drawLine(Color.White, Offset(marker.x - 5f, marker.y - 5f), Offset(marker.x + 5f, marker.y + 5f), strokeWidth = 2.5f)
+            drawLine(Color.White, Offset(marker.x - 5f, marker.y + 5f), Offset(marker.x + 5f, marker.y - 5f), strokeWidth = 2.5f)
+        }
         snapshot?.activeVehicles?.forEach { vehicle ->
             val trajectory = trajectoryById[vehicle.connectionId] ?: return@forEach
             val targetPoint = pointAtProgress(trajectory.points, vehicle.progress)
@@ -487,7 +523,7 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
                 )
             }
             val center = map(point)
-            val color = vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
+            val color = if (vehicle.isCrashed) Color(0xFFE53935) else vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
             val heading = headingAtProgress(trajectory.points, vehicle.progress)
             // Preserve the real model dimensions at the current world-to-screen scale.
             val bodyLength = vehicle.lengthMeters.toFloat() * scale

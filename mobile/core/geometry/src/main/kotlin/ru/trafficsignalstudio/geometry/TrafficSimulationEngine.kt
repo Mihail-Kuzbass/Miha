@@ -9,6 +9,8 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+import kotlin.random.Random
+import kotlin.math.pow
 
 /**
  * Total flow includes the explicitly classified flows. Any remainder is kept as
@@ -68,7 +70,8 @@ data class SimulatedVehicle(
     val widthMeters: Double = 1.8,
     /** Previous lane's movement path while the lateral manoeuvre is in progress. */
     val laneChangeFromConnectionId: String? = null,
-    val laneChangeProgress: Double = 1.0
+    val laneChangeProgress: Double = 1.0,
+    val isCrashed: Boolean = false
 )
 
 data class MovementSimulationMetrics(
@@ -92,13 +95,24 @@ data class CategorySimulationMetrics(
     val averageDelaySeconds: Double
 )
 
+data class CrashIncident(
+    val id: Int,
+    val timeSeconds: Double,
+    val clearedAtSeconds: Double,
+    val type: CrashRiskBand,
+    val participants: Int,
+    val affectedConnectionIds: Set<String>,
+    val point: Point2D
+)
+
 data class TrafficSimulationSnapshot(
     val timeSeconds: Double,
     val activeVehicles: List<SimulatedVehicle>,
     val totalQueueVehicles: Int,
     val departedVehicles: Int,
     val approachStorageLengthMeters: Double = 120.0,
-    val spillbackVehicles: Int = 0
+    val spillbackVehicles: Int = 0,
+    val activeIncidents: List<CrashIncident> = emptyList()
 )
 
 data class TrafficSimulationResult(
@@ -120,7 +134,10 @@ data class TrafficSimulationResult(
     val physicalLaneVehiclesAtEnd: Int,
     val upstreamQueueAtEnd: Int,
     val laneStorageUtilizationPercent: Double,
-    val maximumLaneStorageUtilizationPercent: Double
+    val maximumLaneStorageUtilizationPercent: Double,
+    val crashRiskPercent: Double = 0.0,
+    val crashRiskBand: CrashRiskBand = CrashRiskBand.FOLLOWING_DISTANCE,
+    val crashIncidents: List<CrashIncident> = emptyList()
 ) {
     val throughputVehiclesPerHour: Double
         get() = totalDepartures * 3600.0 / durationSeconds.coerceAtLeast(1)
@@ -154,7 +171,9 @@ object TrafficSimulationEngine {
         var accelerationMetersPerSecondSquared: Double = 0.0,
         var crossingTimeSeconds: Double? = null,
         var laneChangeFromConnectionId: String? = null,
-        var laneChangeProgress: Double = 1.0
+        var laneChangeProgress: Double = 1.0,
+        var crashedUntilSeconds: Double? = null,
+        var crashIncidentId: Int? = null
     )
 
     private class MovementState(
@@ -183,7 +202,9 @@ object TrafficSimulationEngine {
         if (timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) {
             diagnostics += "Нет действующего циклического светофорного плана: выпуск из очередей не выполняется."
         }
-        TrajectoryConflictAnalyzer.analyzeMovementConflicts(intersection).forEach { conflict ->
+        val riskAssessment = CrashRiskAnalyzer.assess(intersection, demand)
+        val movementConflicts = riskAssessment.conflicts
+        movementConflicts.forEach { conflict ->
             when (conflict.signalStatus) {
                 ConflictSignalStatus.SIMULTANEOUS_GREEN -> diagnostics +=
                     "Опасный конфликт: движения ${conflict.firstConnectionId} и ${conflict.secondConnectionId} имеют одновременный зелёный."
@@ -244,6 +265,19 @@ object TrafficSimulationEngine {
         var maximumSpillbackVehicles = 0
         var time = 0.0
         var snapshotAt = 0.0
+        val incidents = mutableListOf<CrashIncident>()
+        val blockedUntilByConnection = mutableMapOf<String, Double>()
+        val seed = intersection.id.hashCode().toLong() xor demand.durationSeconds.toLong() xor
+            demand.movements.sumOf { (it.totalVehiclesPerHour * 10.0).toLong() }
+        val random = Random(seed)
+        val runHours = demand.durationSeconds / 3600.0
+        val eventProbability = if (riskAssessment.riskPercent <= 0.0) 0.0 else
+            1.0 - (1.0 - riskAssessment.riskPercent / 100.0).coerceIn(0.0, 1.0).pow(runHours)
+        val scheduledIncidentTime = if (random.nextDouble() < eventProbability)
+            random.nextDouble() * demand.durationSeconds else null
+
+        fun isBlocked(connectionId: String, atSeconds: Double): Boolean =
+            (blockedUntilByConnection[connectionId] ?: 0.0) > atSeconds
 
         fun greenFor(connectionId: String, atSeconds: Double): Boolean {
             if (!timing.isValid || timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) return false
@@ -294,8 +328,74 @@ object TrafficSimulationEngine {
             return (acceleration * (1.0 - freeRoadTerm - interaction)).coerceIn(-deceleration, acceleration)
         }
 
+        fun tryCreateIncident() {
+            if (scheduledIncidentTime == null || time + 1e-9 < scheduledIncidentTime || incidents.isNotEmpty()) return
+            val selected: List<Pair<MovementState, VehicleAgent>>
+            val incidentPoint: Point2D
+            val affected: Set<String>
+            when (riskAssessment.band) {
+                CrashRiskBand.FOLLOWING_DISTANCE -> {
+                    val pair = laneGroups.values.firstNotNullOfOrNull { group ->
+                        val candidates = group.flatMap { state ->
+                            state.vehicles.filter { it.crashedUntilSeconds == null && it.positionMeters in -35.0..25.0 }
+                                .map { state to it }
+                        }.sortedByDescending { it.second.positionMeters }
+                        candidates.take(2).takeIf { it.size == 2 }
+                    } ?: return
+                    selected = pair
+                    affected = pair.map { it.first.connectionId }.toSet()
+                    incidentPoint = trajectories[pair.first().first.connectionId]?.points?.firstOrNull()
+                        ?: Point2D(0.0, 0.0)
+                }
+                CrashRiskBand.INTERSECTION_CONFLICT, CrashRiskBand.MULTI_VEHICLE -> {
+                    val candidate = movementConflicts.firstNotNullOfOrNull { conflict ->
+                        val firstState = states[conflict.firstConnectionId] ?: return@firstNotNullOfOrNull null
+                        val secondState = states[conflict.secondConnectionId] ?: return@firstNotNullOfOrNull null
+                        val firstVehicle = firstState.vehicles.firstOrNull {
+                            it.crashedUntilSeconds == null && it.positionMeters in 0.0..(firstState.pathLengthMeters * 0.8)
+                        } ?: return@firstNotNullOfOrNull null
+                        val secondVehicle = secondState.vehicles.firstOrNull {
+                            it.crashedUntilSeconds == null && it.positionMeters in 0.0..(secondState.pathLengthMeters * 0.8)
+                        } ?: return@firstNotNullOfOrNull null
+                        Triple(conflict, firstState to firstVehicle, secondState to secondVehicle)
+                    } ?: return
+                    val desired = if (riskAssessment.band == CrashRiskBand.INTERSECTION_CONFLICT)
+                        random.nextInt(2, 4) else random.nextInt(2, 11)
+                    val connectionIds = setOf(candidate.second.first.connectionId, candidate.third.first.connectionId)
+                    val pool = connectionIds.flatMap { id ->
+                        val state = states.getValue(id)
+                        state.vehicles.filter {
+                            it.crashedUntilSeconds == null && it.positionMeters in 0.0..(state.pathLengthMeters * 0.8)
+                        }.map { state to it }
+                    }.distinctBy { it.second.waiting.id }
+                    selected = pool.take(desired).takeIf { it.size >= 2 } ?: return
+                    affected = connectionIds
+                    incidentPoint = candidate.first.point
+                }
+            }
+            val incidentId = incidents.size + 1
+            val clearedAt = time + random.nextDouble(45.0, 121.0)
+            selected.forEach { (_, vehicle) ->
+                vehicle.crashedUntilSeconds = clearedAt
+                vehicle.crashIncidentId = incidentId
+                vehicle.speedMetersPerSecond = 0.0
+            }
+            affected.forEach { id -> blockedUntilByConnection[id] = clearedAt }
+            incidents += CrashIncident(incidentId, time, clearedAt, riskAssessment.band, selected.size, affected, incidentPoint)
+            diagnostics += when (riskAssessment.band) {
+                CrashRiskBand.FOLLOWING_DISTANCE -> "Смоделировано ДТП из-за несоблюдения дистанции; полоса временно заблокирована."
+                CrashRiskBand.INTERSECTION_CONFLICT -> "Смоделировано столкновение 2–3 автомобилей в конфликтной зоне перекрёстка."
+                CrashRiskBand.MULTI_VEHICLE -> "Смоделировано групповое ДТП на перекрёстке; движение по затронутым траекториям ограничено."
+            }
+        }
+
         val step = demand.timeStepSeconds
         while (time <= demand.durationSeconds + 1e-9) {
+            states.values.forEach { state ->
+                state.vehicles.removeAll { it.crashedUntilSeconds?.let { until -> until <= time } == true }
+            }
+            blockedUntilByConnection.entries.removeAll { it.value <= time }
+            tryCreateIncident()
             // Schedule arrivals into virtual upstream demand queues.
             configured.forEach { movement ->
                 val state = states.getValue(movement.connectionId)
@@ -356,7 +456,7 @@ object TrafficSimulationEngine {
                 approachStates.forEach { sourceState ->
                     val sourceVehicles = sourceState.vehicles.toList()
                     sourceVehicles.forEach vehicleLoop@{ vehicle ->
-                        if (vehicle.positionMeters !in -55.0..-5.0 ||
+                        if (vehicle.crashedUntilSeconds != null || vehicle.positionMeters !in -55.0..-5.0 ||
                             vehicle.speedMetersPerSecond < 2.0 || vehicle.laneChangeProgress < 1.0) return@vehicleLoop
                         val sourceLane = approachLanes[sourceState.fromApproachId]?.get(sourceState.fromLaneId)
                             ?: return@vehicleLoop
@@ -371,7 +471,8 @@ object TrafficSimulationEngine {
                             if (target.fromLaneId == sourceState.fromLaneId || target.movementKind != sourceState.movementKind) return@filter false
                             val targetLane = approachLanes[target.fromApproachId]?.get(target.fromLaneId) ?: return@filter false
                             targetLane.allowedMovements.contains(target.movementKind) &&
-                                targetLane.widthMeters >= vehicle.waiting.model.widthMeters + 0.2
+                                targetLane.widthMeters >= vehicle.waiting.model.widthMeters + 0.2 &&
+                                !isBlocked(target.connectionId, time)
                         }.mapNotNull { target ->
                             val targetAgents = statesByLane[target.fromLaneId].orEmpty().flatMap { it.vehicles }
                                 .filter { it.positionMeters <= 0.0 && it !== vehicle }
@@ -392,7 +493,7 @@ object TrafficSimulationEngine {
                             else Triple(target, targetAgents.count { it.positionMeters <= 0.0 }, frontGap)
                         }
                         val best = candidates.minWithOrNull(compareBy<Triple<MovementState, Int, Double>>({ it.second }, { -it.third }))
-                        if (best != null && (sourceGap < 24.0 || sourceLoad > best.second + 1)) {
+                        if (best != null && (isBlocked(sourceState.connectionId, time) || sourceGap < 24.0 || sourceLoad > best.second + 1)) {
                             laneChanges += Triple(sourceState, best.first, vehicle)
                         }
                     }
@@ -413,6 +514,10 @@ object TrafficSimulationEngine {
                 val allAgents = group.flatMap { state -> state.vehicles.map { state to it } }
                 val ordered = allAgents.sortedByDescending { it.second.positionMeters }
                 for ((state, vehicle) in ordered) {
+                    if (vehicle.crashedUntilSeconds?.let { time < it } == true) {
+                        vehicle.speedMetersPerSecond = 0.0
+                        continue
+                    }
                     val model = vehicle.waiting.model
                     val onApproach = vehicle.positionMeters < 0.0
                     val leaders = if (onApproach) {
@@ -435,7 +540,7 @@ object TrafficSimulationEngine {
                     }
                     var obstacleSpeed: Double? = leader?.speedMetersPerSecond
 
-                    if (onApproach && !greenFor(state.connectionId, time)) {
+                    if (onApproach && (!greenFor(state.connectionId, time) || isBlocked(state.connectionId, time))) {
                         val stopLineGap = -vehicle.positionMeters
                         if (obstacleGap == null || stopLineGap < obstacleGap) {
                             obstacleGap = stopLineGap
@@ -451,7 +556,7 @@ object TrafficSimulationEngine {
                     var nextPosition = oldPosition +
                         (vehicle.speedMetersPerSecond + nextSpeed) * 0.5 * step
 
-                    if (onApproach && !greenFor(state.connectionId, time) && nextPosition >= 0.0) {
+                    if (onApproach && (!greenFor(state.connectionId, time) || isBlocked(state.connectionId, time)) && nextPosition >= 0.0) {
                         nextPosition = -0.05
                         vehicle.speedMetersPerSecond = 0.0
                     } else if (leader != null) {
@@ -538,7 +643,8 @@ object TrafficSimulationEngine {
                             lengthMeters = vehicle.waiting.model.lengthMeters,
                             widthMeters = vehicle.waiting.model.widthMeters,
                             laneChangeFromConnectionId = vehicle.laneChangeFromConnectionId,
-                            laneChangeProgress = vehicle.laneChangeProgress
+                            laneChangeProgress = vehicle.laneChangeProgress,
+                            isCrashed = vehicle.crashedUntilSeconds?.let { time < it } == true
                         )
                     }
                 }.toMutableList()
@@ -579,7 +685,8 @@ object TrafficSimulationEngine {
                     totalQueueVehicles = queueTotal,
                     departedVehicles = totalDepartures,
                     approachStorageLengthMeters = demand.approachStorageLengthMeters,
-                    spillbackVehicles = spillbackTotal
+                    spillbackVehicles = spillbackTotal,
+                    activeIncidents = incidents.filter { time < it.clearedAtSeconds }
                 )
                 snapshotAt += 1.0
             }
@@ -654,7 +761,10 @@ object TrafficSimulationEngine {
             physicalLaneVehiclesAtEnd = physicalLaneVehicles,
             upstreamQueueAtEnd = finalSpillback,
             laneStorageUtilizationPercent = (finalLaneQueueLength / demand.approachStorageLengthMeters * 100.0).coerceIn(0.0, 100.0),
-            maximumLaneStorageUtilizationPercent = (maximumQueueLengthMeters / demand.approachStorageLengthMeters * 100.0).coerceIn(0.0, 100.0)
+            maximumLaneStorageUtilizationPercent = (maximumQueueLengthMeters / demand.approachStorageLengthMeters * 100.0).coerceIn(0.0, 100.0),
+            crashRiskPercent = riskAssessment.riskPercent,
+            crashRiskBand = riskAssessment.band,
+            crashIncidents = incidents.toList()
         )
     }
 
