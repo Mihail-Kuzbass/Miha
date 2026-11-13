@@ -145,9 +145,9 @@ object TrafficSimulationEngine {
         var nextId = 1L
         val nextArrival = mutableMapOf<Pair<String, VehicleClass?>, Double>()
         configured.forEach { movement ->
-            val rates = movement.categoryFlowsPerHour.toMutableMap()
             val residual = movement.unclassifiedVehiclesPerHour
-            val streams = rates.map { it.key to it.value }.toMutableList()
+            val streams = mutableListOf<Pair<VehicleClass?, Double>>()
+            streams += movement.categoryFlowsPerHour.map { it.key to it.value }
             if (residual > 1e-6) streams += null to residual
             streams.forEach { (vehicleClass, rate) ->
                 if (rate > 0.0) nextArrival[movement.connectionId to vehicleClass] = 3600.0 / rate
