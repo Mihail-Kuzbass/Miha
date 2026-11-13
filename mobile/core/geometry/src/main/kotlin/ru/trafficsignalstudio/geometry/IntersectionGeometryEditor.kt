@@ -3,6 +3,7 @@ package ru.trafficsignalstudio.geometry
 import ru.trafficsignalstudio.model.Approach
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.Lane
+import ru.trafficsignalstudio.model.LaneFlowDirection
 import ru.trafficsignalstudio.model.MovementKind
 
 /**
@@ -65,6 +66,20 @@ object IntersectionGeometryEditor {
             }
         )
     }
+
+    fun setLaneFlowDirection(
+        intersection: Intersection,
+        approachId: String,
+        laneId: String,
+        direction: LaneFlowDirection
+    ): Intersection = intersection.copy(
+        approaches = intersection.approaches.map { approach ->
+            if (approach.id != approachId) approach
+            else approach.copy(lanes = approach.lanes.map { lane ->
+                if (lane.id == laneId) lane.copy(flowDirection = direction) else lane
+            })
+        }
+    )
 
     fun validate(intersection: Intersection): List<String> = buildList {
         if (intersection.name.isBlank()) add("Не задано название перекрёстка")
@@ -135,7 +150,8 @@ object IntersectionGeometryEditor {
                 Lane(
                     index = index + 1,
                     widthMeters = template?.widthMeters ?: 3.5,
-                    allowedMovements = template?.allowedMovements ?: emptySet()
+                    allowedMovements = template?.allowedMovements ?: setOf(MovementKind.THROUGH),
+                    flowDirection = template?.flowDirection ?: LaneFlowDirection.INTO_INTERSECTION
                 )
             }
             else -> existing.mapIndexed { index, lane -> lane.copy(index = index + 1) }
