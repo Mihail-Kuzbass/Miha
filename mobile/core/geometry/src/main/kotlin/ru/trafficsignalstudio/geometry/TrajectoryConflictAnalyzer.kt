@@ -264,9 +264,20 @@ object TrajectoryConflictAnalyzer {
 
     private fun collectHits(first: List<Point2D>, second: List<Point2D>): List<Hit> {
         val hits = mutableListOf<Hit>()
-        for (a in first.zipWithNext()) for (b in second.zipWithNext()) {
-            intersections(a.first, a.second, b.first, b.second).forEach { hit ->
-                if (hits.none { distance(it.point, hit.point) <= DEDUPE_DISTANCE_METERS }) hits += hit
+        for ((firstIndex, a) in first.zipWithNext().withIndex()) {
+            for ((secondIndex, b) in second.zipWithNext().withIndex()) {
+                intersections(a.first, a.second, b.first, b.second).forEach { rawHit ->
+                    // A sampled Bézier vertex is not a trajectory endpoint. Only
+                    // classify as a merge when the hit is at an actual path end.
+                    val atPathEndpoint = rawHit.atEndpoint && (
+                        distance(rawHit.point, first.first()) <= DEDUPE_DISTANCE_METERS ||
+                            distance(rawHit.point, first.last()) <= DEDUPE_DISTANCE_METERS ||
+                            distance(rawHit.point, second.first()) <= DEDUPE_DISTANCE_METERS ||
+                            distance(rawHit.point, second.last()) <= DEDUPE_DISTANCE_METERS
+                        )
+                    val hit = Hit(rawHit.point, atPathEndpoint, rawHit.overlap)
+                    if (hits.none { distance(it.point, hit.point) <= DEDUPE_DISTANCE_METERS }) hits += hit
+                }
             }
         }
         return hits
