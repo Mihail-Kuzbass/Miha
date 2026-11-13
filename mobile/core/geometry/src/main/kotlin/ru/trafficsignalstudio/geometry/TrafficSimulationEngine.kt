@@ -1139,14 +1139,24 @@ object TrafficSimulationEngine {
                         .filter { it.positionMeters > 0.0 }
                         .minByOrNull { it.positionMeters }
                 }
+                val firstMovingDownstreamByMovement = group.associate { state ->
+                    state.connectionId to state.vehicles
+                        .asSequence()
+                        .filter {
+                            it.positionMeters > 0.0 &&
+                                it.crashedUntilSeconds?.let { until -> time < until } != true
+                        }
+                        .minByOrNull { it.positionMeters }
+                }
                 approachOrdered.forEach { (state, vehicle) ->
-                    val approachLeader = if (vehicle.passingOffsetMeters > 0.5) {
-                        previousApproachMoving ?: previousApproachAny
+                    val isPassing = vehicle.passingOffsetMeters > 0.5
+                    val approachLeader = if (isPassing) previousApproachMoving else previousApproachAny
+                    val downstreamLeader = if (isPassing) {
+                        firstMovingDownstreamByMovement[state.connectionId]
                     } else {
-                        previousApproachAny
+                        firstDownstreamByMovement[state.connectionId]
                     }
-                    leaderByVehicle[vehicle] = approachLeader
-                        ?: firstDownstreamByMovement[state.connectionId]
+                    leaderByVehicle[vehicle] = approachLeader ?: downstreamLeader
                     previousApproachAny = vehicle
                     if (vehicle.crashedUntilSeconds?.let { time < it } != true) {
                         previousApproachMoving = vehicle
