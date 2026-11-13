@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.LaneFlowDirection
+import ru.trafficsignalstudio.model.LaneConnection
 
 class IntersectionGeometryEditorTest {
     @Test
@@ -95,6 +96,48 @@ class IntersectionGeometryEditorTest {
         )
         val expanded = IntersectionGeometryEditor.setLaneCount(outbound, approach.id, 2)
         assertEquals(LaneFlowDirection.OUT_OF_INTERSECTION, expanded.approaches.first().lanes[1].flowDirection)
+    }
+
+    @Test
+    fun laneConnectionsRequireInboundSourceAndOutboundTarget() {
+        var intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 1)
+        val sourceApproach = intersection.approaches[0]
+        val targetApproach = intersection.approaches[1]
+        val sourceLane = sourceApproach.lanes.first()
+        val targetLane = targetApproach.lanes.first()
+        intersection = IntersectionGeometryEditor.setLaneFlowDirection(
+            intersection, targetApproach.id, targetLane.id, LaneFlowDirection.OUT_OF_INTERSECTION
+        )
+
+        val connection = LaneConnection(
+            fromApproachId = sourceApproach.id,
+            fromLaneId = sourceLane.id,
+            toApproachId = targetApproach.id,
+            toLaneId = targetLane.id
+        )
+        val connected = IntersectionGeometryEditor.addLaneConnection(intersection, connection)
+        assertEquals(1, connected.laneConnections.size)
+        assertTrue(IntersectionGeometryEditor.validate(connected).isEmpty())
+
+        val removed = IntersectionGeometryEditor.removeLaneConnection(connected, connection.id)
+        assertTrue(removed.laneConnections.isEmpty())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun laneConnectionRejectsOutboundSource() {
+        var intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 1)
+        val source = intersection.approaches[0]
+        val target = intersection.approaches[1]
+        intersection = IntersectionGeometryEditor.setLaneFlowDirection(
+            intersection, source.id, source.lanes.first().id, LaneFlowDirection.OUT_OF_INTERSECTION
+        )
+        intersection = IntersectionGeometryEditor.setLaneFlowDirection(
+            intersection, target.id, target.lanes.first().id, LaneFlowDirection.OUT_OF_INTERSECTION
+        )
+        IntersectionGeometryEditor.addLaneConnection(intersection, LaneConnection(
+            fromApproachId = source.id, fromLaneId = source.lanes.first().id,
+            toApproachId = target.id, toLaneId = target.lanes.first().id
+        ))
     }
 
     @Test(expected = IllegalArgumentException::class)
