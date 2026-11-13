@@ -149,7 +149,10 @@ private fun HomeScreen(
         } else if (projects.isEmpty()) {
             Text("Проектов пока нет. Создайте первый проект.")
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(projects, key = { it.id }) { project ->
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Row(
