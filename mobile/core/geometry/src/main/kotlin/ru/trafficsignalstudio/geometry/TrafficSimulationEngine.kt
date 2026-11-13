@@ -66,6 +66,8 @@ data class SimulatedVehicle(
     /** Front-bumper position relative to the stop line, metres. */
     val positionMeters: Double = 0.0,
     val speedMetersPerSecond: Double = 0.0,
+    /** Longitudinal acceleration at the snapshot time; positive = throttle, negative = braking. */
+    val accelerationMetersPerSecondSquared: Double = 0.0,
     val lengthMeters: Double = 4.6,
     val widthMeters: Double = 1.8,
     /** Previous lane's movement path while the lateral manoeuvre is in progress. */
@@ -1008,7 +1010,8 @@ object TrafficSimulationEngine {
                     candidate.first.vehicles += VehicleAgent(
                         waiting = waiting,
                         positionMeters = upstreamFront,
-                        speedMetersPerSecond = min(demand.approachSpeedKmh, waiting.model.maximumSpeedKmh) / 3.6
+                        // Vehicles enter from rest and accelerate according to their own vehicle model.
+                        speedMetersPerSecond = 0.0
                     )
                 }
             }
@@ -1313,6 +1316,7 @@ object TrafficSimulationEngine {
                             queueIndex = index,
                             positionMeters = vehicle.positionMeters,
                             speedMetersPerSecond = vehicle.speedMetersPerSecond,
+                            accelerationMetersPerSecondSquared = vehicle.accelerationMetersPerSecondSquared,
                             lengthMeters = vehicle.waiting.model.lengthMeters,
                             widthMeters = vehicle.waiting.model.widthMeters,
                             laneChangeFromConnectionId = vehicle.laneChangeFromConnectionId,
@@ -1346,6 +1350,7 @@ object TrafficSimulationEngine {
                             queueIndex = index,
                             positionMeters = frontPosition,
                             speedMetersPerSecond = 0.0,
+                            accelerationMetersPerSecondSquared = 0.0,
                             lengthMeters = waiting.model.lengthMeters,
                             widthMeters = waiting.model.widthMeters
                         )

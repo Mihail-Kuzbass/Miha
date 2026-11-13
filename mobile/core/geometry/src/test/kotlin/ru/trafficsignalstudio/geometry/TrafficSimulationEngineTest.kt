@@ -254,4 +254,47 @@ class TrafficSimulationEngineTest {
         assertTrue("Priority rotation must not deadlock all movements", result.totalDepartures > 0)
     }
 
+
+    @Test fun vehiclesAccelerateFromRestAccordingToTheirVehicleModel() {
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 360.0)),
+            durationSeconds = 60,
+            approachStorageLengthMeters = 120.0,
+            approachSpeedKmh = 50.0
+        ))
+        val samples = result.snapshots.mapNotNull { snapshot ->
+            snapshot.activeVehicles.firstOrNull { it.id == 1L }?.let { snapshot.timeSeconds to it }
+        }.filter { it.first < 8.0 }
+        assertTrue("The first vehicle should appear in snapshots", samples.isNotEmpty())
+        assertEquals("Vehicles must start from rest", 0.0, samples.first().second.speedMetersPerSecond, 1e-6)
+        assertTrue(
+            "Speed should increase gradually rather than start at free-flow speed",
+            samples.any { it.second.speedMetersPerSecond in 0.1..5.0 } &&
+                samples.last().second.speedMetersPerSecond > samples.first().second.speedMetersPerSecond
+        )
+        assertTrue("Acceleration must respect the selected vehicle model", samples.all {
+            it.second.accelerationMetersPerSecondSquared <=
+                VehicleModelCatalog.defaultPassengerCar.accelerationMetersPerSecondSquared + 1e-6
+        })
+    }
+
+    @Test fun vehiclesExposeNegativeAccelerationWhileBrakingForRedSignal() {
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 1800.0)),
+            durationSeconds = 120,
+            approachStorageLengthMeters = 20.0,
+            approachSpeedKmh = 50.0
+        ))
+        val samples = result.snapshots.flatMap { snapshot ->
+            snapshot.activeVehicles.map { snapshot.timeSeconds to it }
+        }
+        assertTrue("Braking should be represented by negative acceleration", samples.any { (_, vehicle) ->
+            vehicle.accelerationMetersPerSecondSquared < -0.1 && vehicle.speedMetersPerSecond > 0.0
+        })
+        assertTrue("Queued vehicles must remain behind the stop line",
+            result.snapshots.flatMap { it.activeVehicles }.none {
+                it.queued && it.positionMeters > 0.0
+            })
+    }
+
 }
