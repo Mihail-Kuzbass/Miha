@@ -313,9 +313,10 @@ object IntersectionGeometryEditor {
             val to = approaches.firstOrNull { it.id == connection.toApproachId }
             val source = from?.lanes?.firstOrNull { it.id == connection.fromLaneId }
             val target = to?.lanes?.firstOrNull { it.id == connection.toLaneId }
-            source?.flowDirection == LaneFlowDirection.INTO_INTERSECTION &&
-                target?.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION &&
-                from != null && to != null && classifyMovement(from, to) in source.allowedMovements
+            source != null && target != null && from != null && to != null &&
+                source.flowDirection == LaneFlowDirection.INTO_INTERSECTION &&
+                target.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION &&
+                classifyMovement(from, to) in source.allowedMovements
         }
         val validIds = validConnections.map { it.id }.toSet()
         val updatedPlan = intersection.signalPlan?.copy(
