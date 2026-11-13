@@ -698,8 +698,16 @@ object TrafficSimulationEngine {
                 .coerceAtLeast(0.5)
             val sampleSeconds = 0.1
             val horizonSeconds = 8.0
-            val conflictingIds = conflictingConnectionsById[state.connectionId].orEmpty()
-            if (conflictingIds.isEmpty()) return null
+            val relevantZones = conflictZonesByConnection[state.connectionId].orEmpty().filter { indexed ->
+                val remaining = indexed.ownStationMeters + vehicle.waiting.model.lengthMeters -
+                    vehicle.positionMeters
+                remaining >= -0.5 && timeToCoverDistance(
+                    remaining - vehicle.waiting.model.lengthMeters,
+                    vehicle
+                ) <= horizonSeconds
+            }
+            if (relevantZones.isEmpty()) return null
+            val conflictingIds = relevantZones.mapTo(mutableSetOf()) { it.otherConnectionId }
 
             fun otherHasPriority(otherState: MovementState, other: VehicleAgent): Boolean {
                 val pairZones = conflictZonesByPair[
