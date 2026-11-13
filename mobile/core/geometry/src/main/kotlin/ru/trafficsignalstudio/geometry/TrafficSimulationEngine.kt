@@ -509,8 +509,11 @@ object TrafficSimulationEngine {
                         vehicle.positionMeters - vehicle.waiting.model.lengthMeters <= ownStation + clearance
                     val otherInside = other.positionMeters >= otherEntryFront &&
                         other.positionMeters - other.waiting.model.lengthMeters <= otherStation + clearance
+                    val isCloseEnoughToClaim = other.speedMetersPerSecond > 0.25 ||
+                        otherEntryFront - other.positionMeters <= 12.0
                     val otherCanClaimZone = otherInside || other.positionMeters >= 0.0 ||
-                        (greenFor(otherConnectionId, time) && !isBlocked(otherConnectionId, time))
+                        (isCloseEnoughToClaim && greenFor(otherConnectionId, time) &&
+                            !isBlocked(otherConnectionId, time))
                     if (!otherCanClaimZone) continue
                     val intervalsOverlap = ownEntryTime <= otherExitTime + 0.35 &&
                         otherEntryTime <= ownExitTime + 0.35
@@ -561,7 +564,9 @@ object TrafficSimulationEngine {
             val requiredClearance = passDistanceMeters +
                 vehicle.speedMetersPerSecond * 2.0 + vehicle.waiting.model.lengthMeters + 5.0
             return opposingStates.all { opposingState ->
-                opposingState.vehicles.filter { it.crashedUntilSeconds == null }.all { oncoming ->
+                // A crashed oncoming vehicle remains a physical obstruction until
+                // its incident is cleared; it must never be ignored by the gap check.
+                opposingState.vehicles.all { oncoming ->
                     val oncomingPose = worldPose(opposingState, oncoming)
                     val dx = oncomingPose.first.xMeters - ownPose.first.xMeters
                     val dy = oncomingPose.first.yMeters - ownPose.first.yMeters
