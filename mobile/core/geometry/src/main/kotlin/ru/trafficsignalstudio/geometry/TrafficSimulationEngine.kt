@@ -476,47 +476,57 @@ object TrafficSimulationEngine {
         }
 
         fun detectPhysicalContactCollisions() {
+            // Spatial hash keeps envelope checks local instead of comparing every
+            // vehicle with every other vehicle on every simulation tick.
+            val cellSizeMeters = 20.0
             val active = states.values.flatMap { state ->
-                state.vehicles.filter { it.crashedUntilSeconds == null }.map { state to it }
+                state.vehicles.filter { it.crashedUntilSeconds == null }.map { vehicle ->
+                    Triple(state, vehicle, worldPose(state, vehicle))
+                }
             }
-            for (i in active.indices) {
-                val (firstState, firstVehicle) = active[i]
-                if (firstVehicle.crashedUntilSeconds != null) continue
-                for (j in i + 1 until active.size) {
-                    val (secondState, secondVehicle) = active[j]
-                    if (secondVehicle.crashedUntilSeconds != null) continue
-                    if (firstVehicle.waiting.id == secondVehicle.waiting.id) continue
-                    val firstPose = worldPose(firstState, firstVehicle)
-                    val secondPose = worldPose(secondState, secondVehicle)
-                    if (!rectanglesOverlap(
-                        firstPose.first, firstPose.second,
-                        firstVehicle.waiting.model.lengthMeters, firstVehicle.waiting.model.widthMeters,
-                        secondPose.first, secondPose.second,
-                        secondVehicle.waiting.model.lengthMeters, secondVehicle.waiting.model.widthMeters
-                    )) continue
+            val buckets = active.groupBy { entry ->
+                kotlin.math.floor(entry.third.first.xMeters / cellSizeMeters).toInt() to
+                    kotlin.math.floor(entry.third.first.yMeters / cellSizeMeters).toInt()
+            }
+            for ((cell, firstEntries) in buckets) {
+                for (offsetX in -1..1) for (offsetY in -1..1) {
+                    val secondEntries = buckets[(cell.first + offsetX) to (cell.second + offsetY)] ?: continue
+                    for ((firstState, firstVehicle, firstPose) in firstEntries) {
+                        if (firstVehicle.crashedUntilSeconds != null) continue
+                        for ((secondState, secondVehicle, secondPose) in secondEntries) {
+                            if (firstVehicle.waiting.id >= secondVehicle.waiting.id ||
+                                secondVehicle.crashedUntilSeconds != null) continue
+                            if (!rectanglesOverlap(
+                                firstPose.first, firstPose.second,
+                                firstVehicle.waiting.model.lengthMeters, firstVehicle.waiting.model.widthMeters,
+                                secondPose.first, secondPose.second,
+                                secondVehicle.waiting.model.lengthMeters, secondVehicle.waiting.model.widthMeters
+                            )) continue
 
-                    val incidentId = incidents.size + 1
-                    val clearedAt = time + random.nextDouble(45.0, 121.0)
-                    firstVehicle.crashedUntilSeconds = clearedAt
-                    secondVehicle.crashedUntilSeconds = clearedAt
-                    firstVehicle.crashIncidentId = incidentId
-                    secondVehicle.crashIncidentId = incidentId
-                    firstVehicle.speedMetersPerSecond = 0.0
-                    secondVehicle.speedMetersPerSecond = 0.0
-                    val affected = setOf(firstState.connectionId, secondState.connectionId)
-                    affected.forEach { blockedUntilByConnection[it] = clearedAt }
-                    incidents += CrashIncident(
-                        incidentId, time, clearedAt,
-                        if (riskAssessment.band == CrashRiskBand.NO_CRASH)
-                            CrashRiskBand.INTERSECTION_CONFLICT else riskAssessment.band,
-                        2, affected,
-                        Point2D(
-                            (firstPose.first.xMeters + secondPose.first.xMeters) / 2.0,
-                            (firstPose.first.yMeters + secondPose.first.yMeters) / 2.0
-                        ),
-                        CrashIncidentCause.PHYSICAL_CONTACT
-                    )
-                    diagnostics += "ДТП зарегистрировано по фактическому соприкосновению габаритов автомобилей; затронутые траектории временно заблокированы."
+                            val incidentId = incidents.size + 1
+                            val clearedAt = time + random.nextDouble(45.0, 121.0)
+                            firstVehicle.crashedUntilSeconds = clearedAt
+                            secondVehicle.crashedUntilSeconds = clearedAt
+                            firstVehicle.crashIncidentId = incidentId
+                            secondVehicle.crashIncidentId = incidentId
+                            firstVehicle.speedMetersPerSecond = 0.0
+                            secondVehicle.speedMetersPerSecond = 0.0
+                            val affected = setOf(firstState.connectionId, secondState.connectionId)
+                            affected.forEach { blockedUntilByConnection[it] = clearedAt }
+                            incidents += CrashIncident(
+                                incidentId, time, clearedAt,
+                                if (riskAssessment.band == CrashRiskBand.NO_CRASH)
+                                    CrashRiskBand.INTERSECTION_CONFLICT else riskAssessment.band,
+                                2, affected,
+                                Point2D(
+                                    (firstPose.first.xMeters + secondPose.first.xMeters) / 2.0,
+                                    (firstPose.first.yMeters + secondPose.first.yMeters) / 2.0
+                                ),
+                                CrashIncidentCause.PHYSICAL_CONTACT
+                            )
+                            diagnostics += "ДТП зарегистрировано по фактическому соприкосновению габаритов автомобилей; затронутые траектории временно заблокированы."
+                        }
+                    }
                 }
             }
         }
