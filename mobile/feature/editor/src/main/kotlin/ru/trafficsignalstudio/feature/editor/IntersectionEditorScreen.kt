@@ -219,7 +219,7 @@ private fun IntersectionGeometryPreview(
         } ?: 7.0
         val scale = size.minDimension * 0.34f / maxRoadWidthMeters.coerceAtLeast(1.0).toFloat()
         val roadWidths = intersection.approaches.associate { approach ->
-            approach.id to (approach.lanes.sumOf { it.widthMeters } * scale).coerceAtLeast(24f)
+            approach.id to (approach.lanes.sumOf { it.widthMeters }.toFloat() * scale).coerceAtLeast(24f)
         }
         val junctionHalf = (roadWidths.values.maxOrNull() ?: 24f) / 2f
         val dash = PathEffect.dashPathEffect(floatArrayOf(14f, 12f))
