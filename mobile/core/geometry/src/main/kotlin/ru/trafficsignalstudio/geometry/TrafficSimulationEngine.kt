@@ -511,9 +511,9 @@ object TrafficSimulationEngine {
                         other.positionMeters - other.waiting.model.lengthMeters <= otherStation + clearance
                     val isCloseEnoughToClaim = other.speedMetersPerSecond > 0.25 ||
                         otherEntryFront - other.positionMeters <= 12.0
-                    val otherCanClaimZone = otherInside || other.positionMeters >= 0.0 ||
-                        (isCloseEnoughToClaim && greenFor(otherConnectionId, time) &&
-                            !isBlocked(otherConnectionId, time))
+                    val otherCanClaimZone = otherInside || (isCloseEnoughToClaim &&
+                        (other.positionMeters >= 0.0 ||
+                            (greenFor(otherConnectionId, time) && !isBlocked(otherConnectionId, time))))
                     if (!otherCanClaimZone) continue
                     val intervalsOverlap = ownEntryTime <= otherExitTime + 0.35 &&
                         otherEntryTime <= ownExitTime + 0.35
