@@ -88,9 +88,12 @@ fun IntersectionEditorScreen(
     intersection: Intersection?,
     onBack: () -> Unit,
     onSave: () -> Unit,
-    onProjectChange: (ProjectDocument) -> Unit
+    onProjectChange: (ProjectDocument) -> Unit,
+    onSelectIntersection: (String) -> Unit,
+    onAddIntersection: () -> Unit
 ) {
     var showSimulation by remember(intersection?.id) { mutableStateOf(false) }
+    var intersectionMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
     if (showSimulation && intersection != null) {
         TrafficSimulationScreen(intersection = intersection, onBack = { showSimulation = false })
         return
@@ -161,7 +164,19 @@ fun IntersectionEditorScreen(
                 Text("Геометрический редактор", style = MaterialTheme.typography.titleLarge)
                 Text(project.name, style = MaterialTheme.typography.bodySmall)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (project.network.intersections.size > 1) {
+                    Box {
+                        OutlinedButton(onClick = { intersectionMenuExpanded = true }) { Text("Узлы ▾") }
+                        DropdownMenu(expanded = intersectionMenuExpanded, onDismissRequest = { intersectionMenuExpanded = false }) {
+                            project.network.intersections.forEachIndexed { index, item ->
+                                DropdownMenuItem(text = { Text((index + 1).toString() + ". " + item.name) },
+                                    onClick = { intersectionMenuExpanded = false; onSelectIntersection(item.id) })
+                            }
+                        }
+                    }
+                }
+                if (project.network.intersections.isNotEmpty()) OutlinedButton(onClick = onAddIntersection) { Text("+ Узел") }
                 OutlinedButton(onClick = { showSimulation = true }, enabled = intersection != null) { Text("Моделирование") }
                 OutlinedButton(onClick = onBack) { Text("Назад") }
             }

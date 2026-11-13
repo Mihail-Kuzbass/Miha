@@ -1,6 +1,7 @@
 package ru.trafficsignalstudio.mobile
 
 import android.os.Bundle
+import android.app.Activity
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +50,8 @@ private fun TrafficSignalStudioApp() {
     val scope = rememberCoroutineScope()
     var projects by remember { mutableStateOf(emptyList<ProjectDocument>()) }
     var selectedProject by remember { mutableStateOf<ProjectDocument?>(null) }
+    var workspaceMode by remember { mutableStateOf<WorkspaceMode?>(null) }
+    var selectedIntersectionId by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
 
     suspend fun refreshProjects() {
@@ -61,10 +64,19 @@ private fun TrafficSignalStudioApp() {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         val project = selectedProject
         if (project != null) {
+            val activeIntersection = project.network.intersections.firstOrNull { it.id == selectedIntersectionId }
+                ?: project.network.intersections.firstOrNull()
             IntersectionEditorScreen(
                 project = project,
-                intersection = project.network.intersections.firstOrNull(),
-                onBack = { selectedProject = null },
+                intersection = activeIntersection,
+                onBack = { selectedProject = null; selectedIntersectionId = null },
+                onSelectIntersection = { selectedIntersectionId = it },
+                onAddIntersection = {
+                    val next = IntersectionTemplates.fourLeg().copy(name = "Перекрёсток " + (project.network.intersections.size + 1))
+                    selectedProject = project.copy(updatedAtEpochMs = System.currentTimeMillis(),
+                        network = project.network.copy(intersections = project.network.intersections + next))
+                    selectedIntersectionId = next.id
+                },
                 onProjectChange = { selectedProject = it },
                 onSave = {
                     scope.launch {
@@ -76,31 +88,57 @@ private fun TrafficSignalStudioApp() {
                 }
             )
         } else {
+            if (workspaceMode == null) {
+                MainMenuScreen(
+                    onSingle = { workspaceMode = WorkspaceMode.SINGLE },
+                    onNetwork = { workspaceMode = WorkspaceMode.NETWORK },
+                    onExit = { (context as? Activity)?.finish() }
+                )
+            } else {
             HomeScreen(
+                mode = workspaceMode!!,
                 projects = projects,
                 isLoading = isLoading,
+                onBack = { workspaceMode = null },
                 onCreate = { selectedTemplate ->
                     scope.launch {
-                        val newProject = ProjectDocument.newProject("Новый проект").copy(
-                            network = RoadNetwork(
-                                intersections = listOf(selectedTemplate)
-                            )
+                        val title = if (workspaceMode == WorkspaceMode.NETWORK) "Новая сеть перекрёстков" else "Новый перекрёсток"
+                        val newProject = ProjectDocument.newProject(title).copy(
+                            network = RoadNetwork(intersections = listOf(selectedTemplate))
                         )
                         withContext(Dispatchers.IO) { store.save(newProject) }
                         refreshProjects()
                         selectedProject = newProject
+                        selectedIntersectionId = selectedTemplate.id
                     }
                 },
-                onOpen = { selectedProject = it }
+                onOpen = { selectedProject = it; selectedIntersectionId = it.network.intersections.firstOrNull()?.id }
             )
+            }
         }
+    }
+}
+
+private enum class WorkspaceMode { SINGLE, NETWORK }
+
+@Composable
+private fun MainMenuScreen(onSingle: () -> Unit, onNetwork: () -> Unit, onExit: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Text("TrafficSignalStudio", style = MaterialTheme.typography.headlineLarge)
+        Text("Проектирование и микромоделирование дорожного движения", modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
+        Button(onClick = onSingle, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Text("Одиночный перекрёсток") }
+        Button(onClick = onNetwork, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Text("Сеть перекрёстков") }
+        OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth().padding(top = 18.dp)) { Text("Выход из программы") }
+        Text("Версия 0.2.0", modifier = Modifier.padding(top = 28.dp), style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
 private fun HomeScreen(
+    mode: WorkspaceMode,
     projects: List<ProjectDocument>,
     isLoading: Boolean,
+    onBack: () -> Unit,
     onCreate: (Intersection) -> Unit,
     onOpen: (ProjectDocument) -> Unit
 ) {
@@ -138,10 +176,13 @@ private fun HomeScreen(
         modifier = Modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("TrafficSignalStudio", style = MaterialTheme.typography.headlineMedium)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(if (mode == WorkspaceMode.SINGLE) "Одиночный перекрёсток" else "Сеть перекрёстков", style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = onBack) { Text("В меню") }
+        }
         Text("Мобильная инженерная среда проектирования и моделирования")
         Button(onClick = { showTemplatePicker = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("Создать проект")
+            Text(if (mode == WorkspaceMode.SINGLE) "Создать перекрёсток" else "Создать сеть")
         }
         Text("Последние проекты", style = MaterialTheme.typography.titleLarge)
         if (isLoading) {
