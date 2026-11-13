@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -23,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -34,7 +36,10 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
 import ru.trafficsignalstudio.geometry.SignalPlanTimingAnalyzer
 import ru.trafficsignalstudio.geometry.TrafficSimulationDemand
@@ -121,6 +126,8 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
     var zoomScale by remember(intersection.id) { mutableStateOf(1f) }
     var panOffset by remember(intersection.id) { mutableStateOf(Offset.Zero) }
     var inputError by remember(intersection.id) { mutableStateOf<String?>(null) }
+    var isSimulating by remember(intersection.id) { mutableStateOf(false) }
+    val simulationScope = rememberCoroutineScope()
     val timingReport = remember(intersection.id, intersection.signalPlan, intersection.laneConnections) {
         SignalPlanTimingAnalyzer.analyze(intersection)
     }
@@ -256,37 +263,73 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
         }
         Button(
             onClick = {
-                try {
-                    val demands = intersection.laneConnections.map { connection ->
-                        val form = forms[connection.id] ?: MovementDemandForm("600", defaultCategories)
-                        MovementTrafficDemand(
-                            connectionId = connection.id,
-                            totalVehiclesPerHour = form.total.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                            categoryFlowsPerHour = VehicleClass.values().mapNotNull { cls ->
-                                val value = form.categories[cls]?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
-                                if (value > 0.0) cls to value else null
-                            }.toMap()
+                if (!isSimulating) {
+                    try {
+                        val demands = intersection.laneConnections.map { connection ->
+                            val form = forms[connection.id] ?: MovementDemandForm("600", defaultCategories)
+                            MovementTrafficDemand(
+                                connectionId = connection.id,
+                                totalVehiclesPerHour = form.total.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                categoryFlowsPerHour = VehicleClass.values().mapNotNull { cls ->
+                                    val value = form.categories[cls]?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+                                    if (value > 0.0) cls to value else null
+                                }.toMap()
+                            )
+                        }
+                        val storageMeters = approachStorageLength.replace(',', '.').toDoubleOrNull()
+                            ?: throw IllegalArgumentException("Укажите корректную длину подхода")
+                        val entrySpeedKmh = approachSpeed.replace(',', '.').toDoubleOrNull()
+                            ?: throw IllegalArgumentException("Укажите корректную скорость входа")
+                        val simulationDemand = TrafficSimulationDemand(
+                            movements = demands,
+                            durationSeconds = durationMinutes * 60,
+                            approachStorageLengthMeters = storageMeters,
+                            approachSpeedKmh = entrySpeedKmh
                         )
+                        inputError = null
+                        isSimulating = true
+                        isPlaying = false
+                        simulationScope.launch {
+                            try {
+                                // The microscopic engine is CPU-bound. Keep it off
+                                // the Compose/UI thread so long scenarios do not freeze
+                                // the screen or trigger an Android ANR.
+                                val computed = withContext(Dispatchers.Default) {
+                                    TrafficSimulationEngine.run(intersection, simulationDemand)
+                                }
+                                result = computed
+                                selectedSnapshotIndex = 0
+                            } catch (error: Exception) {
+                                inputError = error.message ?: "Не удалось выполнить моделирование"
+                            } finally {
+                                isSimulating = false
+                            }
+                        }
+                    } catch (error: IllegalArgumentException) {
+                        inputError = error.message ?: "Проверьте значения интенсивности"
                     }
-                    inputError = null
-                    val storageMeters = approachStorageLength.replace(',', '.').toDoubleOrNull()
-                        ?: throw IllegalArgumentException("Укажите корректную длину подхода")
-                    val entrySpeedKmh = approachSpeed.replace(',', '.').toDoubleOrNull()
-                        ?: throw IllegalArgumentException("Укажите корректную скорость входа")
-                    result = TrafficSimulationEngine.run(intersection, TrafficSimulationDemand(
-                        movements = demands,
-                        durationSeconds = durationMinutes * 60,
-                        approachStorageLengthMeters = storageMeters,
-                        approachSpeedKmh = entrySpeedKmh
-                    ))
-                    selectedSnapshotIndex = 0
-                    isPlaying = false
-                } catch (error: IllegalArgumentException) {
-                    inputError = error.message ?: "Проверьте значения интенсивности"
                 }
             },
+            enabled = !isSimulating,
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Запустить моделирование") }
+        ) {
+            if (isSimulating) {
+                CircularProgressIndicator(
+                    modifier = Modifier.height(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Text("  Выполняется моделирование…")
+            } else {
+                Text("Запустить моделирование")
+            }
+        }
+        if (isSimulating) {
+            Text(
+                "Расчёт выполняется в фоновом потоке. Не закрывайте экран до завершения.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
         inputError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
         result?.let { simulation ->
