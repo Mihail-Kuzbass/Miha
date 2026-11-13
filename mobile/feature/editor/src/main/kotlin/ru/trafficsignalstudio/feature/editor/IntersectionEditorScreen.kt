@@ -1168,10 +1168,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawVehicleGlyph(
     center: Offset,
     headingDegrees: Float,
     pixelsPerMeter: Float,
-    model: VehicleModel
+    model: VehicleModel,
+    articulationAngleDegrees: Float = 0f
 ) {
-    val length = (model.lengthMeters.toFloat() * pixelsPerMeter).coerceIn(12f, 64f)
-    val width = (model.widthMeters.toFloat() * pixelsPerMeter).coerceIn(6f, 22f)
+    // Keep the model proportions intact while limiting its screen footprint.
+    val rawLength = model.lengthMeters.toFloat() * pixelsPerMeter
+    val fit = min(1f, 76f / rawLength.coerceAtLeast(1f))
+    val length = (rawLength * fit).coerceAtLeast(14f)
+    val width = (model.widthMeters.toFloat() * pixelsPerMeter * fit).coerceIn(7f, 29f)
+    val left = center.x - width / 2f
+    val top = center.y - length / 2f
     val bodyColor = when (model.vehicleClass) {
         VehicleClass.PASSENGER_CAR -> Color(0xFF1565C0)
         VehicleClass.LIGHT_COMMERCIAL -> Color(0xFF00897B)
@@ -1181,38 +1187,104 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawVehicleGlyph(
         VehicleClass.MOTORCYCLE -> Color(0xFF6A1B9A)
         VehicleClass.BICYCLE -> Color(0xFF455A64)
     }
-    rotate(headingDegrees, center) {
-        val left = center.x - width / 2f
-        val top = center.y - length / 2f
-        drawRoundRect(
-            color = bodyColor,
-            topLeft = Offset(left, top),
-            size = Size(width, length),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.22f),
-        )
-        drawRoundRect(
-            color = Color.White,
-            topLeft = Offset(left + width * 0.16f, top + length * 0.12f),
-            size = Size(width * 0.68f, length * 0.17f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.12f)
-        )
-        drawRoundRect(
-            color = Color(0xFF263238),
-            topLeft = Offset(left + width * 0.12f, top + length * 0.04f),
-            size = Size(width * 0.76f, length * 0.08f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.08f)
-        )
-        if (model.articulationPointFromFrontMeters != null) {
-            val jointY = top + length * (model.articulationPointFromFrontMeters.toFloat() / model.lengthMeters.toFloat())
-            drawLine(Color(0xFFFFEB3B), Offset(left, jointY), Offset(left + width, jointY), 1.5f)
+    val articulated = model.articulationPointFromFrontMeters
+    val jointDistance = articulated?.let { (it / model.lengthMeters * length).coerceIn(length * 0.25f, length * 0.78f) }
+
+    fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBodySection(
+        sectionTop: Float,
+        sectionLength: Float,
+        sectionColor: Color,
+        frontSection: Boolean,
+        rearSection: Boolean
+    ) {
+        if (sectionLength <= 1f) return
+        val corner = androidx.compose.ui.geometry.CornerRadius(width * 0.2f)
+        drawRoundRect(sectionColor, Offset(left, sectionTop), Size(width, sectionLength), corner)
+        // Windscreen / passenger windows are separate surfaces, not a single generic stripe.
+        if (frontSection) {
+            drawRoundRect(Color(0xFF172B3A), Offset(left + width * 0.15f, sectionTop + sectionLength * 0.07f),
+                Size(width * 0.70f, sectionLength * 0.15f),
+                androidx.compose.ui.geometry.CornerRadius(width * 0.1f))
+            if (model.vehicleClass == VehicleClass.PASSENGER_CAR) {
+                drawRoundRect(Color(0xFF90CAF9), Offset(left + width * 0.19f, sectionTop + sectionLength * 0.28f),
+                    Size(width * 0.62f, sectionLength * 0.18f),
+                    androidx.compose.ui.geometry.CornerRadius(width * 0.08f))
+                drawRoundRect(Color(0xFF263238), Offset(left + width * 0.2f, sectionTop + sectionLength * 0.55f),
+                    Size(width * 0.6f, sectionLength * 0.2f),
+                    androidx.compose.ui.geometry.CornerRadius(width * 0.07f))
+            } else {
+                drawRoundRect(Color(0xFFB3E5FC), Offset(left + width * 0.14f, sectionTop + sectionLength * 0.3f),
+                    Size(width * 0.72f, sectionLength * 0.16f),
+                    androidx.compose.ui.geometry.CornerRadius(width * 0.06f))
+            }
         }
-        drawRoundRect(
-            color = Color.White.copy(alpha = 0.9f),
-            topLeft = Offset(left, top),
-            size = Size(width, length),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.22f),
-            style = Stroke(width = 1.2f)
-        )
+        if (rearSection) {
+            val windowCount = if (model.vehicleClass == VehicleClass.ARTICULATED_TRUCK) 1 else 3
+            for (index in 0 until windowCount) {
+                val segment = sectionLength * 0.52f / windowCount
+                val windowTop = sectionTop + sectionLength * 0.12f + index * segment
+                drawRoundRect(Color(0xFF263238).copy(alpha = 0.82f),
+                    Offset(left + width * 0.13f, windowTop),
+                    Size(width * 0.74f, segment * 0.58f),
+                    androidx.compose.ui.geometry.CornerRadius(width * 0.05f))
+            }
+        }
+        // Axles and tyres are visible at both sides of the body.
+        val wheelY = listOf(sectionTop + sectionLength * 0.22f, sectionTop + sectionLength * 0.78f)
+        wheelY.forEach { y ->
+            val wheelHeight = (sectionLength * 0.095f).coerceIn(2f, 6f)
+            drawRoundRect(Color(0xFF101820), Offset(left - width * 0.07f, y - wheelHeight / 2f),
+                Size(width * 0.16f, wheelHeight), androidx.compose.ui.geometry.CornerRadius(wheelHeight / 3f))
+            drawRoundRect(Color(0xFF101820), Offset(left + width * 0.91f, y - wheelHeight / 2f),
+                Size(width * 0.16f, wheelHeight), androidx.compose.ui.geometry.CornerRadius(wheelHeight / 3f))
+        }
+        if (frontSection) {
+            val lampY = sectionTop + sectionLength * 0.025f
+            drawCircle(Color(0xFFFFF59D), radius = (width * 0.09f).coerceAtLeast(1.2f), center = Offset(left + width * 0.22f, lampY))
+            drawCircle(Color(0xFFFFF59D), radius = (width * 0.09f).coerceAtLeast(1.2f), center = Offset(left + width * 0.78f, lampY))
+        }
+        if (rearSection) {
+            val lampY = sectionTop + sectionLength * 0.97f
+            drawCircle(Color(0xFFE53935), radius = (width * 0.08f).coerceAtLeast(1.1f), center = Offset(left + width * 0.22f, lampY))
+            drawCircle(Color(0xFFE53935), radius = (width * 0.08f).coerceAtLeast(1.1f), center = Offset(left + width * 0.78f, lampY))
+        }
+        drawRoundRect(Color.White.copy(alpha = 0.9f), Offset(left, sectionTop), Size(width, sectionLength),
+            corner, style = Stroke(width = 1.1f))
+    }
+
+    rotate(headingDegrees, center) {
+        if (jointDistance == null) {
+            drawBodySection(top, length, bodyColor, frontSection = true, rearSection = true)
+        } else {
+            val jointY = top + jointDistance
+            val rearLength = length - jointDistance
+            // Front tractor / front bus section.
+            drawBodySection(top, jointDistance, bodyColor, frontSection = true, rearSection = false)
+            // The rear module rotates around the articulation pivot, exposing the bend angle.
+            rotate(articulationAngleDegrees.coerceIn(-35f, 35f), Offset(center.x, jointY)) {
+                drawBodySection(jointY, rearLength, bodyColor.copy(alpha = 0.94f),
+                    frontSection = false, rearSection = true)
+            }
+            drawCircle(Color(0xFFFFEB3B), radius = (width * 0.17f).coerceAtLeast(2f),
+                center = Offset(center.x, jointY))
+            drawCircle(Color(0xFF263238), radius = (width * 0.07f).coerceAtLeast(1f),
+                center = Offset(center.x, jointY))
+        }
+        // Distinct body details for powered two-wheelers.
+        if (model.vehicleClass == VehicleClass.MOTORCYCLE || model.vehicleClass == VehicleClass.BICYCLE) {
+            drawLine(Color(0xFFCFD8DC), Offset(center.x, top + length * 0.2f),
+                Offset(center.x, top + length * 0.82f), width * 0.12f, cap = StrokeCap.Round)
+            drawCircle(Color(0xFFCFD8DC), radius = width * 0.22f, center = Offset(center.x, top + length * 0.12f),
+                style = Stroke(width = 1.3f))
+            drawCircle(Color(0xFFCFD8DC), radius = width * 0.22f, center = Offset(center.x, top + length * 0.88f),
+                style = Stroke(width = 1.3f))
+        }
+        if (model.vehicleClass == VehicleClass.TROLLEYBUS || model.vehicleClass == VehicleClass.ARTICULATED_TROLLEYBUS) {
+            drawLine(Color(0xFF263238), Offset(center.x - width * 0.18f, top + length * 0.1f),
+                Offset(center.x - width * 0.32f, top - length * 0.12f), 1.2f)
+            drawLine(Color(0xFF263238), Offset(center.x + width * 0.18f, top + length * 0.1f),
+                Offset(center.x + width * 0.32f, top - length * 0.12f), 1.2f)
+        }
     }
 }
 
