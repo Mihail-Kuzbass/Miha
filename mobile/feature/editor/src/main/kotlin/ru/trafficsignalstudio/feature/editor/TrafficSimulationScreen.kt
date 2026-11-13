@@ -26,9 +26,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
@@ -270,12 +272,51 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
             val trajectory = trajectories.firstOrNull { it.connectionId == vehicle.connectionId } ?: return@forEach
             val point = pointAtProgress(trajectory.points, vehicle.progress)
             val center = map(point)
+            val model = vehicle.vehicleClass?.let { cls ->
+                VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls }
+            } ?: VehicleModelCatalog.defaultPassengerCar
             val color = vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
-            drawCircle(color, radius = if (vehicle.queued) 4.5f else 6f, center = center)
-            drawCircle(Color.White.copy(alpha = 0.8f), radius = if (vehicle.queued) 4.5f else 6f,
-                center = center, style = Stroke(width = 1f))
+            val heading = headingAtProgress(trajectory.points, vehicle.progress)
+            val bodyLength = (model.lengthMeters.toFloat() * scale).coerceIn(7f, 22f)
+            val bodyWidth = (model.widthMeters.toFloat() * scale).coerceIn(4f, 9f)
+            rotate(heading, center) {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(center.x - bodyLength / 2f, center.y - bodyWidth / 2f),
+                    size = Size(bodyLength, bodyWidth),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(bodyWidth * 0.25f)
+                )
+                drawRoundRect(
+                    color = Color(0xFF263238),
+                    topLeft = Offset(center.x - bodyLength * 0.12f, center.y - bodyWidth * 0.36f),
+                    size = Size(bodyLength * 0.22f, bodyWidth * 0.72f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(bodyWidth * 0.12f)
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.9f),
+                    topLeft = Offset(center.x - bodyLength / 2f, center.y - bodyWidth / 2f),
+                    size = Size(bodyLength, bodyWidth),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(bodyWidth * 0.25f),
+                    style = Stroke(width = 0.8f)
+                )
+            }
         }
     }
+}
+
+private fun headingAtProgress(points: List<ru.trafficsignalstudio.model.Point2D>, progress: Double): Float {
+    if (points.size < 2) return 0f
+    val segmentIndex = if (progress < 0.0) 0 else {
+        val lengths = points.zipWithNext().map { (a, b) -> hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters) }
+        val target = progress.coerceIn(0.0, 1.0) * lengths.sum().coerceAtLeast(1e-6)
+        var remaining = target
+        lengths.indexOfFirst { length ->
+            if (remaining <= length) true else { remaining -= length; false }
+        }.let { if (it < 0) lengths.lastIndex else it }
+    }
+    val a = points[segmentIndex]
+    val b = points[(segmentIndex + 1).coerceAtMost(points.lastIndex)]
+    return Math.toDegrees(kotlin.math.atan2(-(b.yMeters - a.yMeters), b.xMeters - a.xMeters)).toFloat()
 }
 
 private fun pointAtProgress(points: List<ru.trafficsignalstudio.model.Point2D>, progress: Double): ru.trafficsignalstudio.model.Point2D {
