@@ -445,6 +445,45 @@ object TrafficSimulationEngine {
             }
         }
 
+        fun rectanglesOverlap(
+            firstCenter: Point2D,
+            firstDirection: Point2D,
+            firstLength: Double,
+            firstWidth: Double,
+            secondCenter: Point2D,
+            secondDirection: Point2D,
+            secondLength: Double,
+            secondWidth: Double
+        ): Boolean {
+            fun corners(center: Point2D, direction: Point2D, length: Double, width: Double): List<Point2D> {
+                val halfLength = length / 2.0
+                val halfWidth = width / 2.0
+                val normalX = -direction.yMeters
+                val normalY = direction.xMeters
+                return listOf(
+                    Point2D(center.xMeters + direction.xMeters * halfLength + normalX * halfWidth,
+                        center.yMeters + direction.yMeters * halfLength + normalY * halfWidth),
+                    Point2D(center.xMeters + direction.xMeters * halfLength - normalX * halfWidth,
+                        center.yMeters + direction.yMeters * halfLength - normalY * halfWidth),
+                    Point2D(center.xMeters - direction.xMeters * halfLength + normalX * halfWidth,
+                        center.yMeters - direction.yMeters * halfLength + normalY * halfWidth),
+                    Point2D(center.xMeters - direction.xMeters * halfLength - normalX * halfWidth,
+                        center.yMeters - direction.yMeters * halfLength - normalY * halfWidth)
+                )
+            }
+            val first = corners(firstCenter, firstDirection, firstLength, firstWidth)
+            val second = corners(secondCenter, secondDirection, secondLength, secondWidth)
+            val firstNormal = Point2D(-firstDirection.yMeters, firstDirection.xMeters)
+            val secondNormal = Point2D(-secondDirection.yMeters, secondDirection.xMeters)
+            val axes = listOf(firstDirection, firstNormal, secondDirection, secondNormal)
+            return axes.all { axis ->
+                val firstProjection = first.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
+                val secondProjection = second.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
+                firstProjection.max() >= secondProjection.min() - 0.02 &&
+                    secondProjection.max() >= firstProjection.min() - 0.02
+            }
+        }
+
         /**
          * Predicts near-future body-envelope conflicts with vehicles on other
          * movements. The vehicle with the later simulation ID yields, giving
@@ -503,45 +542,6 @@ object TrafficSimulationEngine {
             val requiredDeceleration = (vehicle.speedMetersPerSecond / (2.0 * timeToContact))
                 .coerceIn(0.8, serviceDeceleration)
             return -requiredDeceleration
-        }
-
-        fun rectanglesOverlap(
-            firstCenter: Point2D,
-            firstDirection: Point2D,
-            firstLength: Double,
-            firstWidth: Double,
-            secondCenter: Point2D,
-            secondDirection: Point2D,
-            secondLength: Double,
-            secondWidth: Double
-        ): Boolean {
-            fun corners(center: Point2D, direction: Point2D, length: Double, width: Double): List<Point2D> {
-                val halfLength = length / 2.0
-                val halfWidth = width / 2.0
-                val normalX = -direction.yMeters
-                val normalY = direction.xMeters
-                return listOf(
-                    Point2D(center.xMeters + direction.xMeters * halfLength + normalX * halfWidth,
-                        center.yMeters + direction.yMeters * halfLength + normalY * halfWidth),
-                    Point2D(center.xMeters + direction.xMeters * halfLength - normalX * halfWidth,
-                        center.yMeters + direction.yMeters * halfLength - normalY * halfWidth),
-                    Point2D(center.xMeters - direction.xMeters * halfLength + normalX * halfWidth,
-                        center.yMeters - direction.yMeters * halfLength + normalY * halfWidth),
-                    Point2D(center.xMeters - direction.xMeters * halfLength - normalX * halfWidth,
-                        center.yMeters - direction.yMeters * halfLength - normalY * halfWidth)
-                )
-            }
-            val first = corners(firstCenter, firstDirection, firstLength, firstWidth)
-            val second = corners(secondCenter, secondDirection, secondLength, secondWidth)
-            val firstNormal = Point2D(-firstDirection.yMeters, firstDirection.xMeters)
-            val secondNormal = Point2D(-secondDirection.yMeters, secondDirection.xMeters)
-            val axes = listOf(firstDirection, firstNormal, secondDirection, secondNormal)
-            return axes.all { axis ->
-                val firstProjection = first.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
-                val secondProjection = second.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
-                firstProjection.max() >= secondProjection.min() - 0.02 &&
-                    secondProjection.max() >= firstProjection.min() - 0.02
-            }
         }
 
         fun detectPhysicalContactCollisions() {
