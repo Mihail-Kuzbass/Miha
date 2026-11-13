@@ -35,7 +35,8 @@ data class SignalPlanTimingReport(
             it.code == SignalPlanIssueCode.INVALID_YELLOW_DURATION ||
             it.code == SignalPlanIssueCode.INVALID_ALL_RED_DURATION ||
             it.code == SignalPlanIssueCode.UNKNOWN_CONNECTION ||
-            it.code == SignalPlanIssueCode.CONNECTION_ASSIGNED_MULTIPLE_PHASES
+            it.code == SignalPlanIssueCode.CONNECTION_ASSIGNED_MULTIPLE_PHASES ||
+            it.code == SignalPlanIssueCode.UNASSIGNED_CONNECTION
     }
 }
 
