@@ -208,6 +208,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 intersection = intersection,
                 timeSeconds = simulation.snapshots.getOrNull(selectedSnapshotIndex)?.timeSeconds ?: 0.0,
                 cycleLengthSeconds = timingReport.cycleLengthSeconds,
+                planIsValid = timingReport.isValid,
                 phaseWindows = timingReport.phaseWindows
             )
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -268,6 +269,7 @@ private fun SignalPhaseStatusCard(
     intersection: Intersection,
     timeSeconds: Double,
     cycleLengthSeconds: Int,
+    planIsValid: Boolean,
     phaseWindows: List<ru.trafficsignalstudio.geometry.SignalPhaseWindow>
 ) {
     val plan = intersection.signalPlan
@@ -278,6 +280,7 @@ private fun SignalPhaseStatusCard(
     val phase = window?.let { selected -> plan?.phases?.firstOrNull { it.id == selected.phaseId } }
     val activeWindow = window
     val state = when {
+        plan?.enabled != true || !planIsValid -> "План не готов"
         phase == null || activeWindow == null -> "Нет активной фазы"
         cycleTime < activeWindow.greenEndSeconds -> "Зелёный"
         cycleTime < activeWindow.yellowEndSeconds -> "Жёлтый"
