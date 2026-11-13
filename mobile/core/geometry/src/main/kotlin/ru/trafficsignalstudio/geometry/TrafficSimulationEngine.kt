@@ -195,23 +195,26 @@ object TrafficSimulationEngine {
 
         val trajectories = TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection).associateBy { it.connectionId }
         val connections = intersection.laneConnections.associateBy { it.id }
-        val configured = demand.movements.filter { it.connectionId in connections }
+        // Keep a physical state for every valid lane connection, including
+        // connections with zero demand. Otherwise an empty adjacent lane cannot
+        // be selected as a lane-change target.
+        val configured = demand.movements.filter { it.connectionId in trajectories }
         if (configured.size != demand.movements.size) {
-            diagnostics += "Часть потоков ссылается на отсутствующие связи полос и не включена в расчёт."
+            diagnostics += "Часть потоков ссылается на отсутствующие или некорректные связи полос и не включена в расчёт."
         }
-        val states = configured.associate { item ->
-            val connection = connections.getValue(item.connectionId)
-            val length = trajectories[item.connectionId]?.points?.let(::polylineLength)?.coerceAtLeast(8.0) ?: 20.0
-            val trajectory = trajectories[item.connectionId]
-            item.connectionId to MovementState(
-                item.connectionId,
+        val states = trajectories.values.associate { trajectory ->
+            val connection = connections.getValue(trajectory.connectionId)
+            val length = trajectory.points.let(::polylineLength).coerceAtLeast(8.0)
+            trajectory.connectionId to MovementState(
+                trajectory.connectionId,
                 connection.fromApproachId,
                 connection.fromLaneId,
-                trajectory?.movementKind ?: ru.trafficsignalstudio.model.MovementKind.THROUGH,
+                trajectory.movementKind,
                 length
             )
         }
-        val laneGroups = states.values.groupBy { it.fromLaneId }
+        // Lane IDs are only unique within an approach, not across the network.
+        val laneGroups = states.values.groupBy { it.fromApproachId to it.fromLaneId }
         val approachGroups = states.values.groupBy { it.fromApproachId }
         val approachLanes = intersection.approaches.associate { approach ->
             approach.id to approach.lanes.associateBy { it.id }
