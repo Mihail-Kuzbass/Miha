@@ -17,6 +17,8 @@ import ru.trafficsignalstudio.model.RoadSegment
 import ru.trafficsignalstudio.model.RoadSegmentKind
 import ru.trafficsignalstudio.model.RoadSegmentLane
 import ru.trafficsignalstudio.model.LaneTravelDirection
+import ru.trafficsignalstudio.model.SignalPhase
+import ru.trafficsignalstudio.model.SignalPlan
 import ru.trafficsignalstudio.model.RoadJunctionNode
 import ru.trafficsignalstudio.model.SafetyIsland
 import java.io.File
@@ -136,6 +138,23 @@ class ProjectJsonStore(context: Context) {
                                 })
                             }
                         })
+                        intersection.signalPlan?.let { plan ->
+                            put("signalPlan", JSONObject().apply {
+                                put("enabled", plan.enabled)
+                                put("phases", JSONArray().apply {
+                                    plan.phases.forEach { phase ->
+                                        put(JSONObject().apply {
+                                            put("id", phase.id)
+                                            put("name", phase.name)
+                                            put("greenConnectionIds", JSONArray(phase.greenConnectionIds.toList()))
+                                            put("greenSeconds", phase.greenSeconds)
+                                            put("yellowSeconds", phase.yellowSeconds)
+                                            put("allRedSeconds", phase.allRedSeconds)
+                                        })
+                                    }
+                                })
+                            })
+                        }
                     })
                 }
             }
@@ -252,6 +271,25 @@ class ProjectJsonStore(context: Context) {
                     toLaneId = connection.optString("toLaneId")
                 )
             }
+            val planJson = item.optJSONObject("signalPlan")
+            val signalPlan = planJson?.let { plan ->
+                val phasesJson = plan.optJSONArray("phases") ?: JSONArray()
+                SignalPlan(
+                    enabled = plan.optBoolean("enabled", true),
+                    phases = (0 until phasesJson.length()).mapNotNull { phaseIndex ->
+                        val phase = phasesJson.optJSONObject(phaseIndex) ?: return@mapNotNull null
+                        val greens = phase.optJSONArray("greenConnectionIds") ?: JSONArray()
+                        SignalPhase(
+                            id = phase.optString("id"),
+                            name = phase.optString("name", "Фаза " + (phaseIndex + 1)),
+                            greenConnectionIds = (0 until greens.length()).map { greens.getString(it) }.toSet(),
+                            greenSeconds = phase.optInt("greenSeconds", 30),
+                            yellowSeconds = phase.optInt("yellowSeconds", 3),
+                            allRedSeconds = phase.optInt("allRedSeconds", 1)
+                        )
+                    }
+                )
+            }
             Intersection(
                 id = item.optString("id"),
                 name = item.optString("name"),
@@ -262,7 +300,8 @@ class ProjectJsonStore(context: Context) {
                 roadSegments = segments,
                 junctionNodes = nodes,
                 safetyIslands = islands,
-                laneConnections = connections
+                laneConnections = connections,
+                signalPlan = signalPlan
             )
         }
         return ProjectDocument(
