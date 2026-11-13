@@ -354,28 +354,15 @@ object TrafficSimulationEngine {
         }
 
 
-        fun worldPose(
-            state: MovementState,
-            vehicle: VehicleAgent,
-            positionMeters: Double = vehicle.positionMeters,
-            lateralOffsetMeters: Double = vehicle.passingOffsetMeters
-        ): Pair<Point2D, Point2D> {
-            val points = trajectories.getValue(state.connectionId).points
-            val centerDistance = positionMeters - vehicle.waiting.model.lengthMeters / 2.0
-            val progress = centerDistance / state.pathLengthMeters
+        fun pathPose(connectionId: String, progress: Double): Pair<Point2D, Point2D> {
+            val points = trajectories.getValue(connectionId).points
             val lengths = points.zipWithNext().map { (a, b) -> hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters) }
             var distanceAlong = progress * lengths.sum().coerceAtLeast(1e-6)
             var segmentIndex = 0
-            if (distanceAlong < 0.0) {
-                segmentIndex = 0
-            } else {
+            if (distanceAlong >= 0.0) {
                 while (segmentIndex < lengths.lastIndex && distanceAlong > lengths[segmentIndex]) {
                     distanceAlong -= lengths[segmentIndex]
                     segmentIndex++
-                }
-                if (distanceAlong > lengths.last()) {
-                    segmentIndex = lengths.lastIndex
-                    distanceAlong = lengths.last() + distanceAlong - lengths.last()
                 }
             }
             val a = points[segmentIndex]
@@ -385,13 +372,32 @@ object TrafficSimulationEngine {
                 else (distanceAlong / segmentLength).coerceIn(0.0, 1.0)
             val dx = (b.xMeters - a.xMeters) / segmentLength
             val dy = (b.yMeters - a.yMeters) / segmentLength
-            val base = Point2D(a.xMeters + (b.xMeters - a.xMeters) * ratio,
-                a.yMeters + (b.yMeters - a.yMeters) * ratio)
-            val shifted = Point2D(
-                base.xMeters - dy * lateralOffsetMeters,
-                base.yMeters + dx * lateralOffsetMeters
-            )
-            return shifted to Point2D(dx, dy)
+            return Point2D(a.xMeters + (b.xMeters - a.xMeters) * ratio,
+                a.yMeters + (b.yMeters - a.yMeters) * ratio) to Point2D(dx, dy)
+        }
+
+        fun worldPose(
+            state: MovementState,
+            vehicle: VehicleAgent,
+            positionMeters: Double = vehicle.positionMeters,
+            lateralOffsetMeters: Double = vehicle.passingOffsetMeters
+        ): Pair<Point2D, Point2D> {
+            val progress = (positionMeters - vehicle.waiting.model.lengthMeters / 2.0) / state.pathLengthMeters
+            val target = pathPose(state.connectionId, progress)
+            val sourceState = vehicle.laneChangeFromConnectionId?.let { states[it] }
+            val basePoint = if (sourceState == null) target.first else {
+                val source = pathPose(sourceState.connectionId, progress).first
+                val blend = vehicle.laneChangeProgress.coerceIn(0.0, 1.0)
+                Point2D(
+                    source.xMeters + (target.first.xMeters - source.xMeters) * blend,
+                    source.yMeters + (target.first.yMeters - source.yMeters) * blend
+                )
+            }
+            val direction = target.second
+            return Point2D(
+                basePoint.xMeters - direction.yMeters * lateralOffsetMeters,
+                basePoint.yMeters + direction.xMeters * lateralOffsetMeters
+            ) to direction
         }
 
         fun opposingGapIsSafe(
@@ -704,11 +710,11 @@ object TrafficSimulationEngine {
             // margin is available; otherwise it remains queued behind the incident.
             laneGroups.values.forEach { group ->
                 val laneAgents = group.flatMap { it.vehicles }
-                group.forEach { sourceState ->
+                group.forEach stateLoop@{ sourceState ->
                     val sourceLane = approachLanes[sourceState.fromApproachId]?.get(sourceState.fromLaneId)
-                        ?: return@forEach
-                    sourceState.vehicles.forEach { vehicle ->
-                        if (vehicle.crashedUntilSeconds != null || vehicle.positionMeters > 0.0) return@forEach
+                        ?: return@stateLoop
+                    sourceState.vehicles.forEach vehicleLoop@{ vehicle ->
+                        if (vehicle.crashedUntilSeconds != null || vehicle.positionMeters > 0.0) return@vehicleLoop
                         val obstacle = laneAgents.filter {
                             it !== vehicle && it.crashedUntilSeconds?.let { until -> time < until } == true &&
                                 it.positionMeters > vehicle.positionMeters
@@ -767,7 +773,10 @@ object TrafficSimulationEngine {
                     }
                     var obstacleSpeed: Double? = leader?.speedMetersPerSecond
 
-                    if (onApproach && (!greenFor(state.connectionId, time) || isBlocked(state.connectionId, time))) {
+                    val mustStopAtSignal = onApproach && !greenFor(state.connectionId, time)
+                    val mustStopAtBlockedLine = onApproach && isBlocked(state.connectionId, time) &&
+                        vehicle.passingOffsetMeters <= 0.5
+                    if (mustStopAtSignal || mustStopAtBlockedLine) {
                         val stopLineGap = -vehicle.positionMeters
                         if (obstacleGap == null || stopLineGap < obstacleGap) {
                             obstacleGap = stopLineGap
@@ -783,7 +792,9 @@ object TrafficSimulationEngine {
                     var nextPosition = oldPosition +
                         (vehicle.speedMetersPerSecond + nextSpeed) * 0.5 * step
 
-                    if (onApproach && (!greenFor(state.connectionId, time) || isBlocked(state.connectionId, time)) && nextPosition >= 0.0) {
+                    if (onApproach && (!greenFor(state.connectionId, time) ||
+                            (isBlocked(state.connectionId, time) && vehicle.passingOffsetMeters <= 0.5)) &&
+                        nextPosition >= 0.0) {
                         nextPosition = -0.05
                         vehicle.speedMetersPerSecond = 0.0
                     } else if (leader != null) {
