@@ -41,7 +41,12 @@ jobs:
           packages: 'platform-tools'
 
       - name: Install Android SDK platform
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+        run: |
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+          # The preview SDK is published as android-37.0, while AGP resolves compileSdk 37 as android-37.
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
+          fi
 
       - name: Run domain tests
         run: |
