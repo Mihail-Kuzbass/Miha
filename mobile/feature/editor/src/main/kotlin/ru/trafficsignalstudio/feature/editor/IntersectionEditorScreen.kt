@@ -48,6 +48,8 @@ import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.RoadSegment
 import ru.trafficsignalstudio.model.RoadSegmentKind
+import ru.trafficsignalstudio.model.RoadJunctionNode
+import ru.trafficsignalstudio.model.SafetyIsland
 import kotlin.math.max
 import kotlin.math.min
 
@@ -73,6 +75,7 @@ fun IntersectionEditorScreen(
     var viewportZoom by remember(intersection?.id) { mutableStateOf(1f) }
     var viewportPan by remember(intersection?.id) { mutableStateOf(Offset.Zero) }
     var selectedRoadSegmentId by remember(intersection?.id) { mutableStateOf<String?>(null) }
+    var islandDrawingMode by remember(intersection?.id) { mutableStateOf(false) }
     val pendingPoints = remember(intersection?.id) { mutableStateListOf<Point2D>() }
     val safeIndex = selectedApproachIndex.coerceIn(0, max(0, (intersection?.approaches?.size ?: 1) - 1))
     val selectedApproach = intersection?.approaches?.getOrNull(safeIndex)
@@ -115,7 +118,7 @@ fun IntersectionEditorScreen(
                         intersection = intersection,
                         pendingPoints = pendingPoints,
                         drawingTool = drawingTool,
-                        onAddPoint = { point -> pendingPoints.add(point) },
+                        onAddPoint = { point -> pendingPoints.add(snapToNetwork(point, intersection)) },
                         zoom = viewportZoom, pan = viewportPan, editMode = editMode,
                         selectedSegmentId = selectedRoadSegmentId,
                         onViewportChange = { z, p -> viewportZoom = z; viewportPan = p },
@@ -144,11 +147,14 @@ fun IntersectionEditorScreen(
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Редактор геометрии", style = MaterialTheme.typography.titleMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (!editMode) Button(onClick = { editMode = true; pendingPoints.clear() }) { Text("Редактировать") }
+                        if (!editMode) Button(onClick = { editMode = true; pendingPoints.clear(); islandDrawingMode = false }) { Text("Редактировать") }
                         else Button(onClick = { editMode = false }) { Text("Рисовать") }
                         OutlinedButton(onClick = { viewportZoom = 1f; viewportPan = Offset.Zero }) { Text("Сброс вида") }
                     }
-                    if (!editMode) Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    if (!editMode) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { islandDrawingMode = !islandDrawingMode; pendingPoints.clear() }) { Text(if (islandDrawingMode) "Рисуем островок" else "Добавить островок") }
+                    }
+                    if (!editMode && !islandDrawingMode) Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         DrawingTool.values().forEach { tool ->
                             if (drawingTool == tool) {
@@ -158,7 +164,7 @@ fun IntersectionEditorScreen(
                             }
                         }
                     }
-                    if (!editMode) Text("Точки: ${pendingPoints.size}. Нажимайте на поле, чтобы задать трассу.")
+                    if (!editMode) Text(if (islandDrawingMode) "Поставьте минимум 3 точки контура островка." else "Точки: ${pendingPoints.size}. Нажимайте на поле, чтобы задать трассу.")
                     else Text("Коснитесь дороги для выбора. Перетаскивайте узлы; жест двумя пальцами — масштаб и панорамирование.")
                     if (!editMode) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedButton(onClick = { if (pendingPoints.isNotEmpty()) pendingPoints.removeAt(pendingPoints.lastIndex) },
@@ -167,7 +173,12 @@ fun IntersectionEditorScreen(
                             Text("Очистить")
                         }
                         Button(onClick = {
-                            if (pendingPoints.size >= 2) {
+                            if (islandDrawingMode && pendingPoints.size >= 3) {
+                                val island = SafetyIsland(name = "Островок ${intersection.safetyIslands.size + 1}", boundary = pendingPoints.toList())
+                                updateIntersection(intersection.copy(safetyIslands = intersection.safetyIslands + island))
+                                pendingPoints.clear()
+                                islandDrawingMode = false
+                            } else if (!islandDrawingMode && pendingPoints.size >= 2) {
                                 val kind = drawingTool.kind
                                 val level = if (kind == RoadSegmentKind.BRIDGE) 1 else 0
                                 val segment = RoadSegment(
@@ -183,21 +194,37 @@ fun IntersectionEditorScreen(
                                     laneCount = if (kind == RoadSegmentKind.BRIDGE) 3 else 2,
                                     elevationLevel = level,
                                     isRamp = kind == RoadSegmentKind.RAMP,
-                                    kind = kind
+                                    kind = kind,
+                                    arcRadiusMeters = if (kind == RoadSegmentKind.ARC) estimateArcRadius(pendingPoints) else null
                                 )
+                                val updatedSegments = intersection.roadSegments + segment
                                 updateIntersection(intersection.copy(
                                     type = ru.trafficsignalstudio.model.IntersectionType.CUSTOM,
-                                    roadSegments = intersection.roadSegments + segment
+                                    roadSegments = updatedSegments,
+                                    junctionNodes = rebuildJunctionNodes(updatedSegments)
                                 ))
                                 pendingPoints.clear()
                             }
-                        }, enabled = pendingPoints.size >= 2) { Text("Завершить линию") }
+                        }, enabled = if (islandDrawingMode) pendingPoints.size >= 3 else pendingPoints.size >= 2) { Text(if (islandDrawingMode) "Завершить островок" else "Завершить линию") }
                     }
                     if (!editMode) Text("Для дуги задайте 3 точки: начало, контрольную и конец. Мост рисуется на верхнем уровне.")
                     val selectedSegment = intersection.roadSegments.firstOrNull { it.id == selectedRoadSegmentId }
                     if (editMode && selectedSegment != null) {
                         Text("Выбрано: ${selectedSegment.name}", style = MaterialTheme.typography.titleSmall)
                         Text("Полос: ${selectedSegment.laneCount} · ширина: ${"%.2f".format(selectedSegment.widthMeters)} м")
+                        if (selectedSegment.kind == RoadSegmentKind.ARC && selectedSegment.centerline.size >= 3) {
+                            Text("Радиус дуги: ${"%.1f".format(selectedSegment.arcRadiusMeters ?: estimateArcRadius(selectedSegment.centerline))} м")
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = {
+                                    val v = adjustArcRadius(selectedSegment, (selectedSegment.arcRadiusMeters ?: estimateArcRadius(selectedSegment.centerline)) - 1.0)
+                                    updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map { if (it.id == selectedSegment.id) v else it }))
+                                }) { Text("− 1 м") }
+                                OutlinedButton(onClick = {
+                                    val v = adjustArcRadius(selectedSegment, (selectedSegment.arcRadiusMeters ?: estimateArcRadius(selectedSegment.centerline)) + 1.0)
+                                    updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map { if (it.id == selectedSegment.id) v else it }))
+                                }) { Text("+ 1 м") }
+                            }
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(onClick = {
                                 val v = selectedSegment.copy(laneCount = (selectedSegment.laneCount - 1).coerceAtLeast(1))
@@ -217,7 +244,8 @@ fun IntersectionEditorScreen(
                             }, enabled = selectedSegment.widthMeters < 60.0) { Text("+ ширина") }
                         }
                         OutlinedButton(onClick = {
-                            updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.filterNot { it.id == selectedSegment.id }))
+                            val remaining = intersection.roadSegments.filterNot { it.id == selectedSegment.id }
+                            updateIntersection(intersection.copy(roadSegments = remaining, junctionNodes = rebuildJunctionNodes(remaining)))
                             selectedRoadSegmentId = null
                         }) { Text("Удалить дорогу") }
                     } else if (editMode) Text("Выберите дорожный сегмент касанием на поле.")
@@ -415,6 +443,21 @@ private fun IntersectionGeometryPreview(
 
         // Draw independent centerline segments first. Their elevation level is
         // visual metadata; conflict analysis will use it in a later engine step.
+        intersection.safetyIslands.forEach { island ->
+            if (island.boundary.size >= 3) {
+                val islandPath = Path().apply {
+                    val first = island.boundary.first()
+                    moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f, center.y - first.yMeters.toFloat() * scale * 0.35f)
+                    island.boundary.drop(1).forEach { p -> lineTo(center.x + p.xMeters.toFloat() * scale * 0.35f, center.y - p.yMeters.toFloat() * scale * 0.35f) }
+                    close()
+                }
+                drawPath(islandPath, Color(0xFFB7C9A5))
+                drawPath(islandPath, Color(0xFF4F6B45), style = Stroke(width = 2f))
+            }
+        }
+        intersection.junctionNodes.forEach { node ->
+            drawCircle(Color(0xFFFFC107), 5f, Offset(center.x + node.point.xMeters.toFloat() * scale * 0.35f, center.y - node.point.yMeters.toFloat() * scale * 0.35f))
+        }
         intersection.roadSegments.sortedBy { it.elevationLevel }.forEach { segment ->
             if (segment.centerline.size >= 2) {
                 val screenPoints = segment.centerline.map { point ->
@@ -525,4 +568,55 @@ private fun distanceToSegment(px: Float, py: Float, ax: Float, ay: Float, bx: Fl
     if (lengthSquared <= 0.0001f) return kotlin.math.hypot(px - ax, py - ay)
     val t = (((px - ax) * dx + (py - ay) * dy) / lengthSquared).coerceIn(0f, 1f)
     return kotlin.math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+
+
+private fun snapToNetwork(point: Point2D, intersection: Intersection): Point2D {
+    val candidates = intersection.junctionNodes.map { it.point } +
+        intersection.roadSegments.flatMap { listOfNotNull(it.centerline.firstOrNull(), it.centerline.lastOrNull()) }
+    return candidates.minByOrNull { kotlin.math.hypot(it.xMeters - point.xMeters, it.yMeters - point.yMeters) }
+        ?.takeIf { kotlin.math.hypot(it.xMeters - point.xMeters, it.yMeters - point.yMeters) <= 2.0 } ?: point
+}
+
+private fun rebuildJunctionNodes(segments: List<RoadSegment>): List<RoadJunctionNode> {
+    data class Endpoint(val point: Point2D, val segmentId: String)
+    val endpoints = segments.flatMap { segment ->
+        listOfNotNull(segment.centerline.firstOrNull(), segment.centerline.lastOrNull()).map { Endpoint(it, segment.id) }
+    }
+    val groups = mutableListOf<MutableList<Endpoint>>()
+    endpoints.forEach { endpoint ->
+        val group = groups.firstOrNull { g -> g.any {
+            kotlin.math.hypot(it.point.xMeters - endpoint.point.xMeters, it.point.yMeters - endpoint.point.yMeters) <= 1.0
+        } }
+        if (group == null) groups.add(mutableListOf(endpoint)) else group.add(endpoint)
+    }
+    return groups.filter { it.map(Endpoint::segmentId).distinct().size >= 2 }.map { group ->
+        RoadJunctionNode(
+            point = Point2D(group.map { it.point.xMeters }.average(), group.map { it.point.yMeters }.average()),
+            connectedSegmentIds = group.map { it.segmentId }.toSet()
+        )
+    }
+}
+
+private fun estimateArcRadius(points: List<Point2D>): Double {
+    if (points.size < 3) return 10.0
+    val a = points.first(); val b = points[1]; val c = points.last()
+    val ab = kotlin.math.hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters)
+    val bc = kotlin.math.hypot(c.xMeters - b.xMeters, c.yMeters - b.yMeters)
+    val ca = kotlin.math.hypot(a.xMeters - c.xMeters, a.yMeters - c.yMeters)
+    val cross = kotlin.math.abs((b.xMeters - a.xMeters) * (c.yMeters - a.yMeters) - (b.yMeters - a.yMeters) * (c.xMeters - a.xMeters))
+    return if (cross < 1e-6) 1000.0 else (ab * bc * ca / (2.0 * cross)).coerceAtLeast(1.0)
+}
+
+private fun adjustArcRadius(segment: RoadSegment, requestedRadius: Double): RoadSegment {
+    if (segment.centerline.size < 3) return segment
+    val radius = requestedRadius.coerceIn(2.0, 1000.0)
+    val points = segment.centerline.toMutableList()
+    val a = points.first(); val control = points[1]; val end = points.last()
+    val midX = (a.xMeters + end.xMeters) / 2.0
+    val midY = (a.yMeters + end.yMeters) / 2.0
+    val oldRadius = segment.arcRadiusMeters ?: estimateArcRadius(points)
+    val factor = (oldRadius / radius).coerceIn(0.05, 20.0)
+    points[1] = Point2D(midX + (control.xMeters - midX) * factor, midY + (control.yMeters - midY) * factor)
+    return segment.copy(centerline = points, arcRadiusMeters = radius)
 }

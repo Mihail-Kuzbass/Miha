@@ -59,6 +59,21 @@ object IntersectionGeometryEditor {
         if (intersection.roadSegments.map { it.id }.distinct().size != intersection.roadSegments.size) {
             add("Идентификаторы дорожных сегментов должны быть уникальными")
         }
+        if (intersection.junctionNodes.map { it.id }.distinct().size != intersection.junctionNodes.size) {
+            add("Идентификаторы узлов соединения должны быть уникальными")
+        }
+        intersection.junctionNodes.forEach { node ->
+            if (!node.point.xMeters.isFinite() || !node.point.yMeters.isFinite()) add("Узел соединения содержит некорректные координаты")
+            if (node.connectedSegmentIds.any { id -> intersection.roadSegments.none { it.id == id } }) add("Узел ссылается на отсутствующий дорожный сегмент")
+        }
+        if (intersection.safetyIslands.map { it.id }.distinct().size != intersection.safetyIslands.size) {
+            add("Идентификаторы островков безопасности должны быть уникальными")
+        }
+        intersection.safetyIslands.forEach { island ->
+            if (island.name.isBlank()) add("У островка безопасности отсутствует название")
+            if (island.boundary.size < 3) add("Контур островка «${island.name}» должен содержать минимум три точки")
+            if (island.boundary.any { !it.xMeters.isFinite() || !it.yMeters.isFinite() }) add("Контур островка «${island.name}» содержит некорректные координаты")
+        }
         intersection.roadSegments.forEach { segment ->
             if (segment.name.isBlank()) add("У дорожного сегмента отсутствует название")
             if (segment.centerline.size < 2) add("Сегмент «${segment.name}» должен содержать минимум две точки")
@@ -66,6 +81,9 @@ object IntersectionGeometryEditor {
                 add("Некорректная ширина сегмента «${segment.name}»")
             }
             if (segment.laneCount !in 1..16) add("Некорректное количество полос сегмента «${segment.name}»")
+            if (segment.arcRadiusMeters != null && (!segment.arcRadiusMeters.isFinite() || segment.arcRadiusMeters <= 0.0)) {
+                add("Некорректный радиус дуги сегмента «${segment.name}»")
+            }
             if (segment.centerline.any { !it.xMeters.isFinite() || !it.yMeters.isFinite() }) {
                 add("Сегмент «${segment.name}» содержит некорректные координаты")
             }

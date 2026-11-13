@@ -52,6 +52,30 @@ class IntersectionTemplatesTest {
     }
 
     @Test
+    fun junctionNodesAndSafetyIslandsAreValidated() {
+        val base = IntersectionTemplates.fourLeg().copy(
+            roadSegments = listOf(
+                RoadSegment(name = "A", centerline = listOf(Point2D(0.0, 0.0), Point2D(10.0, 0.0))),
+                RoadSegment(name = "B", centerline = listOf(Point2D(10.0, 0.0), Point2D(20.0, 0.0)))
+            ),
+            junctionNodes = listOf(
+                ru.trafficsignalstudio.model.RoadJunctionNode(
+                    point = Point2D(10.0, 0.0),
+                    connectedSegmentIds = setOf("missing")
+                )
+            ),
+            safetyIslands = listOf(
+                ru.trafficsignalstudio.model.SafetyIsland(
+                    name = "Островок",
+                    boundary = listOf(Point2D(0.0, 0.0), Point2D(2.0, 0.0), Point2D(1.0, 1.0))
+                )
+            )
+        )
+        assertTrue(IntersectionGeometryEditor.validate(base).any { it.contains("отсутствующий") })
+        assertTrue(IntersectionGeometryEditor.validate(base).none { it.contains("Островок") })
+    }
+
+    @Test
     fun interchangeTemplatesContainIndependentRoadSegments() {
         val diamond = IntersectionTemplates.diamondInterchange()
         val cloverleaf = IntersectionTemplates.cloverleafInterchange()

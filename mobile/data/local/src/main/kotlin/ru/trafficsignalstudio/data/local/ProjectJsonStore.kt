@@ -13,6 +13,8 @@ import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.RoadNetwork
 import ru.trafficsignalstudio.model.RoadSegment
 import ru.trafficsignalstudio.model.RoadSegmentKind
+import ru.trafficsignalstudio.model.RoadJunctionNode
+import ru.trafficsignalstudio.model.SafetyIsland
 import java.io.File
 
 class ProjectJsonStore(context: Context) {
@@ -80,10 +82,29 @@ class ProjectJsonStore(context: Context) {
                                     put("elevationLevel", segment.elevationLevel)
                                     put("isRamp", segment.isRamp)
                                     put("kind", segment.kind.name)
+                                    segment.arcRadiusMeters?.let { put("arcRadiusMeters", it) }
                                     put("centerline", JSONArray().apply {
                                         segment.centerline.forEach { point ->
                                             put(JSONObject().put("x", point.xMeters).put("y", point.yMeters))
                                         }
+                                    })
+                                })
+                            }
+                        })
+                        put("junctionNodes", JSONArray().apply {
+                            intersection.junctionNodes.forEach { node ->
+                                put(JSONObject().apply {
+                                    put("id", node.id); put("x", node.point.xMeters); put("y", node.point.yMeters)
+                                    put("connectedSegmentIds", JSONArray(node.connectedSegmentIds.toList()))
+                                })
+                            }
+                        })
+                        put("safetyIslands", JSONArray().apply {
+                            intersection.safetyIslands.forEach { island ->
+                                put(JSONObject().apply {
+                                    put("id", island.id); put("name", island.name); put("elevationLevel", island.elevationLevel)
+                                    put("boundary", JSONArray().apply {
+                                        island.boundary.forEach { point -> put(JSONObject().put("x", point.xMeters).put("y", point.yMeters)) }
                                     })
                                 })
                             }
@@ -143,7 +164,32 @@ class ProjectJsonStore(context: Context) {
                     elevationLevel = segmentJson.optInt("elevationLevel", 0),
                     isRamp = segmentJson.optBoolean("isRamp", false),
                     kind = runCatching { RoadSegmentKind.valueOf(segmentJson.optString("kind")) }
-                        .getOrDefault(if (segmentJson.optBoolean("isRamp", false)) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE)
+                        .getOrDefault(if (segmentJson.optBoolean("isRamp", false)) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE),
+                    arcRadiusMeters = if (segmentJson.has("arcRadiusMeters")) segmentJson.optDouble("arcRadiusMeters") else null
+                )
+            }
+            val nodesJson = item.optJSONArray("junctionNodes") ?: JSONArray()
+            val nodes = (0 until nodesJson.length()).map { nodeIndex ->
+                val node = nodesJson.getJSONObject(nodeIndex)
+                val ids = node.optJSONArray("connectedSegmentIds") ?: JSONArray()
+                RoadJunctionNode(
+                    id = node.optString("id"),
+                    point = Point2D(node.optDouble("x"), node.optDouble("y")),
+                    connectedSegmentIds = (0 until ids.length()).map { ids.getString(it) }.toSet()
+                )
+            }
+            val islandsJson = item.optJSONArray("safetyIslands") ?: JSONArray()
+            val islands = (0 until islandsJson.length()).map { islandIndex ->
+                val island = islandsJson.getJSONObject(islandIndex)
+                val boundaryJson = island.optJSONArray("boundary") ?: JSONArray()
+                SafetyIsland(
+                    id = island.optString("id"),
+                    name = island.optString("name", "Островок безопасности"),
+                    elevationLevel = island.optInt("elevationLevel", 0),
+                    boundary = (0 until boundaryJson.length()).map { pointIndex ->
+                        val point = boundaryJson.getJSONObject(pointIndex)
+                        Point2D(point.optDouble("x"), point.optDouble("y"))
+                    }
                 )
             }
             Intersection(
@@ -153,7 +199,9 @@ class ProjectJsonStore(context: Context) {
                     .getOrDefault(IntersectionType.CUSTOM),
                 center = Point2D(item.optDouble("centerX"), item.optDouble("centerY")),
                 approaches = approaches,
-                roadSegments = segments
+                roadSegments = segments,
+                junctionNodes = nodes,
+                safetyIslands = islands
             )
         }
         return ProjectDocument(

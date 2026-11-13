@@ -47,7 +47,21 @@ data class RoadSegment(
     val laneCount: Int = 2,
     val elevationLevel: Int = 0,
     val isRamp: Boolean = false,
-    val kind: RoadSegmentKind = if (isRamp) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE
+    val kind: RoadSegmentKind = if (isRamp) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE,
+    val arcRadiusMeters: Double? = null
+)
+
+data class RoadJunctionNode(
+    val id: String = UUID.randomUUID().toString(),
+    val point: Point2D,
+    val connectedSegmentIds: Set<String> = emptySet()
+)
+
+data class SafetyIsland(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Островок безопасности",
+    val boundary: List<Point2D>,
+    val elevationLevel: Int = 0
 )
 
 data class Intersection(
@@ -56,7 +70,9 @@ data class Intersection(
     val type: IntersectionType,
     val center: Point2D = Point2D(0.0, 0.0),
     val approaches: List<Approach>,
-    val roadSegments: List<RoadSegment> = emptyList()
+    val roadSegments: List<RoadSegment> = emptyList(),
+    val junctionNodes: List<RoadJunctionNode> = emptyList(),
+    val safetyIslands: List<SafetyIsland> = emptyList()
 )
 
 data class RoadNetwork(
