@@ -361,7 +361,7 @@ object TrafficSimulationEngine {
                         Triple(conflict, firstState to firstVehicle, secondState to secondVehicle)
                     } ?: return
                     val desired = if (riskAssessment.band == CrashRiskBand.INTERSECTION_CONFLICT)
-                        random.nextInt(2, 4) else random.nextInt(2, 11)
+                        random.nextInt(2, 4) else random.nextInt(1, 11)
                     val connectionIds = setOf(candidate.second.first.connectionId, candidate.third.first.connectionId)
                     val pool = connectionIds.flatMap { id ->
                         val state = states.getValue(id)
@@ -369,7 +369,7 @@ object TrafficSimulationEngine {
                             it.crashedUntilSeconds == null && it.positionMeters in 0.0..(state.pathLengthMeters * 0.8)
                         }.map { state to it }
                     }.distinctBy { it.second.waiting.id }
-                    selected = pool.take(desired).takeIf { it.size >= 2 } ?: return
+                    selected = pool.take(desired).takeIf { it.isNotEmpty() } ?: return
                     affected = connectionIds
                     incidentPoint = candidate.first.point
                 }
@@ -386,7 +386,7 @@ object TrafficSimulationEngine {
             diagnostics += when (riskAssessment.band) {
                 CrashRiskBand.FOLLOWING_DISTANCE -> "Смоделировано ДТП из-за несоблюдения дистанции; полоса временно заблокирована."
                 CrashRiskBand.INTERSECTION_CONFLICT -> "Смоделировано столкновение 2–3 автомобилей в конфликтной зоне перекрёстка."
-                CrashRiskBand.MULTI_VEHICLE -> "Смоделировано групповое ДТП на перекрёстке; движение по затронутым траекториям ограничено."
+                CrashRiskBand.MULTI_VEHICLE -> "Смоделировано ДТП на перекрёстке с числом участников до 10; движение по затронутым траекториям ограничено."
             }
         }
 
