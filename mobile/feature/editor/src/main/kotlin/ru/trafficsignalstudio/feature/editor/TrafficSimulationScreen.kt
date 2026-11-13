@@ -276,10 +276,11 @@ private fun SignalPhaseStatusCard(
         cycleTime >= it.startSeconds && cycleTime < it.allRedEndSeconds
     }
     val phase = window?.let { selected -> plan?.phases?.firstOrNull { it.id == selected.phaseId } }
+    val activeWindow = window
     val state = when {
-        phase == null -> "Нет активной фазы"
-        cycleTime < window!!.greenEndSeconds -> "Зелёный"
-        cycleTime < window.yellowEndSeconds -> "Жёлтый"
+        phase == null || activeWindow == null -> "Нет активной фазы"
+        cycleTime < activeWindow.greenEndSeconds -> "Зелёный"
+        cycleTime < activeWindow.yellowEndSeconds -> "Жёлтый"
         else -> "Общий красный"
     }
     val stateColor = when (state) {
