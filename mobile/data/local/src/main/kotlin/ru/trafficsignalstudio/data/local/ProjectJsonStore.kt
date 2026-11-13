@@ -7,6 +7,7 @@ import ru.trafficsignalstudio.model.Approach
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.IntersectionType
 import ru.trafficsignalstudio.model.Lane
+import ru.trafficsignalstudio.model.LaneFlowDirection
 import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.ProjectDocument
@@ -66,6 +67,7 @@ class ProjectJsonStore(context: Context) {
                                                 put("index", lane.index)
                                                 put("widthMeters", lane.widthMeters)
                                                 put("allowedMovements", JSONArray(lane.allowedMovements.map { it.name }))
+                                                put("flowDirection", lane.flowDirection.name)
                                             })
                                         }
                                     })
@@ -134,11 +136,15 @@ class ProjectJsonStore(context: Context) {
                         .mapNotNull { runCatching { MovementKind.valueOf(movementsJson.getString(it)) }.getOrNull() }
                         .toSet()
                         .ifEmpty { setOf(MovementKind.THROUGH) }
+                    val flowDirection = runCatching {
+                        LaneFlowDirection.valueOf(laneJson.optString("flowDirection"))
+                    }.getOrDefault(LaneFlowDirection.INTO_INTERSECTION)
                     Lane(
                         id = laneJson.optString("id"),
                         index = laneJson.optInt("index"),
                         widthMeters = laneJson.optDouble("widthMeters", 3.5),
-                        allowedMovements = movements
+                        allowedMovements = movements,
+                        flowDirection = flowDirection
                     )
                 }
                 Approach(
