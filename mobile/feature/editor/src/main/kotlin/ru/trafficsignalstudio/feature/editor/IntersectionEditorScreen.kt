@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import ru.trafficsignalstudio.geometry.IntersectionGeometryEditor
 import ru.trafficsignalstudio.model.Intersection
+import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.RoadSegment
@@ -315,41 +316,83 @@ fun IntersectionEditorScreen(
                             ) { Text("+") }
                         }
                     }
-                    Text("Ширина полос (м)", style = MaterialTheme.typography.titleSmall)
-                    selectedApproach.lanes.forEach { lane ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                    Text("Настройка полос", style = MaterialTheme.typography.titleSmall)
+                    Text("Нумерация от правого края проезжей части по ходу движения.")
+                    selectedApproach.lanes.sortedBy { it.index }.forEach { lane ->
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text("Полоса ${lane.index}: ${"%.2f".format(lane.widthMeters)} м")
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                OutlinedButton(
-                                    onClick = {
-                                        updateIntersection(
-                                            IntersectionGeometryEditor.changeLaneWidth(
-                                                intersection, selectedApproach.id, lane.id,
-                                                -IntersectionGeometryEditor.LANE_WIDTH_STEP_METERS
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Полоса ${lane.index} · ${"%.2f".format(lane.widthMeters)} м")
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            updateIntersection(
+                                                IntersectionGeometryEditor.changeLaneWidth(
+                                                    intersection, selectedApproach.id, lane.id,
+                                                    -IntersectionGeometryEditor.LANE_WIDTH_STEP_METERS
+                                                )
                                             )
-                                        )
-                                    },
-                                    enabled = lane.widthMeters > IntersectionGeometryEditor.MIN_LANE_WIDTH_METERS
-                                ) { Text("−") }
-                                OutlinedButton(
-                                    onClick = {
-                                        updateIntersection(
-                                            IntersectionGeometryEditor.changeLaneWidth(
-                                                intersection, selectedApproach.id, lane.id,
-                                                IntersectionGeometryEditor.LANE_WIDTH_STEP_METERS
+                                        },
+                                        enabled = lane.widthMeters > IntersectionGeometryEditor.MIN_LANE_WIDTH_METERS
+                                    ) { Text("−") }
+                                    OutlinedButton(
+                                        onClick = {
+                                            updateIntersection(
+                                                IntersectionGeometryEditor.changeLaneWidth(
+                                                    intersection, selectedApproach.id, lane.id,
+                                                    IntersectionGeometryEditor.LANE_WIDTH_STEP_METERS
+                                                )
                                             )
-                                        )
-                                    },
-                                    enabled = lane.widthMeters < IntersectionGeometryEditor.MAX_LANE_WIDTH_METERS
-                                ) { Text("+") }
+                                        },
+                                        enabled = lane.widthMeters < IntersectionGeometryEditor.MAX_LANE_WIDTH_METERS
+                                    ) { Text("+") }
+                                }
+                            }
+                            Text("Разрешённые направления", style = MaterialTheme.typography.labelMedium)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                MovementKind.values().forEach { movement ->
+                                    val selected = movement in lane.allowedMovements
+                                    val label = when (movement) {
+                                        MovementKind.THROUGH -> "↑ Прямо"
+                                        MovementKind.LEFT -> "↰ Налево"
+                                        MovementKind.RIGHT -> "↱ Направо"
+                                        MovementKind.U_TURN -> "↶ Разворот"
+                                        MovementKind.TRANSIT_ONLY -> "Только ОТ"
+                                    }
+                                    if (selected) {
+                                        Button(
+                                            onClick = {
+                                                if (lane.allowedMovements.size > 1) {
+                                                    updateIntersection(IntersectionGeometryEditor.setLaneMovements(
+                                                        intersection, selectedApproach.id, lane.id,
+                                                        lane.allowedMovements - movement
+                                                    ))
+                                                }
+                                            },
+                                            enabled = lane.allowedMovements.size > 1
+                                        ) { Text(label) }
+                                    } else {
+                                        OutlinedButton(onClick = {
+                                            updateIntersection(IntersectionGeometryEditor.setLaneMovements(
+                                                intersection, selectedApproach.id, lane.id,
+                                                lane.allowedMovements + movement
+                                            ))
+                                        }) { Text(label) }
+                                    }
+                                }
                             }
                         }
                     }
-                    Text("Размеры хранятся в метрах. Допустимая ширина полосы: 2,50–5,00 м.")
+                    Text("Можно назначить несколько манёвров одной полосе. Хотя бы одно направление должно оставаться разрешённым. Ширина: 2,50–5,00 м.")
                 }
             }
         }
