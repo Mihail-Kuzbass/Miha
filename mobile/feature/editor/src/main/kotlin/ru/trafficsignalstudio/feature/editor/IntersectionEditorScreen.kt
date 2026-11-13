@@ -52,6 +52,9 @@ import ru.trafficsignalstudio.model.LaneConnection
 import ru.trafficsignalstudio.model.LaneTravelDirection
 import ru.trafficsignalstudio.geometry.TrajectoryConflictAnalyzer
 import ru.trafficsignalstudio.geometry.TrajectoryConflictKind
+import ru.trafficsignalstudio.geometry.ConflictSignalStatus
+import ru.trafficsignalstudio.model.SignalPhase
+import ru.trafficsignalstudio.model.SignalPlan
 import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.RoadSegment
@@ -94,6 +97,12 @@ fun IntersectionEditorScreen(
     val validationErrors = intersection?.let(IntersectionGeometryEditor::validate).orEmpty()
     val trajectoryConflicts = remember(intersection?.id, intersection?.roadSegments) {
         intersection?.let(TrajectoryConflictAnalyzer::analyze).orEmpty()
+    }
+    val movementTrajectories = remember(intersection?.id, intersection?.laneConnections, intersection?.approaches) {
+        intersection?.let(TrajectoryConflictAnalyzer::buildMovementTrajectories).orEmpty()
+    }
+    val movementConflicts = remember(intersection?.id, intersection?.laneConnections, intersection?.approaches, intersection?.signalPlan) {
+        intersection?.let(TrajectoryConflictAnalyzer::analyzeMovementConflicts).orEmpty()
     }
 
     fun updateIntersection(updated: Intersection) {
@@ -352,6 +361,112 @@ fun IntersectionEditorScreen(
                             style = MaterialTheme.typography.bodySmall)
                     }
                     Text("Проверка учитывает геометрические пересечения полос на одном высотном уровне. Это предварительный анализ, не нормативная экспертиза.",
+                        style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        if (intersection != null) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Траектории поворотов и светофорные фазы", style = MaterialTheme.typography.titleMedium)
+                    Text("Траекторий по связям полос: ${movementTrajectories.size}. Геометрических пар конфликтов: ${movementConflicts.size}.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(onClick = {
+                            val current = intersection.signalPlan ?: SignalPlan()
+                            val phase = SignalPhase(name = "Фаза ${current.phases.size + 1}", greenConnectionIds = emptySet())
+                            updateIntersection(intersection.copy(signalPlan = current.copy(phases = current.phases + phase)))
+                        }) { Text("Добавить фазу") }
+                        OutlinedButton(onClick = {
+                            val current = intersection.signalPlan ?: SignalPlan()
+                            updateIntersection(intersection.copy(signalPlan = current.copy(enabled = !current.enabled)))
+                        }) { Text(if (intersection.signalPlan?.enabled == false) "Включить план" else "Отключить план") }
+                    }
+                    if (intersection.laneConnections.isEmpty()) {
+                        Text("Сначала создайте связи въездных и выездных полос — по ним строятся траектории поворотов.")
+                    } else {
+                        Text("Назначение движений фазам", style = MaterialTheme.typography.titleSmall)
+                        movementTrajectories.forEach { trajectory ->
+                            val from = intersection.approaches.firstOrNull { it.id == trajectory.fromApproachId }
+                            val fromLane = from?.lanes?.firstOrNull { it.id == trajectory.fromLaneId }
+                            val to = intersection.approaches.firstOrNull { it.id == trajectory.toApproachId }
+                            val toLane = to?.lanes?.firstOrNull { it.id == trajectory.toLaneId }
+                            val movementLabel = when (trajectory.movementKind) {
+                                MovementKind.THROUGH -> "прямо"
+                                MovementKind.LEFT -> "налево"
+                                MovementKind.RIGHT -> "направо"
+                                MovementKind.U_TURN -> "разворот"
+                                MovementKind.TRANSIT_ONLY -> "транзит"
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("${from?.name ?: "?"} №${fromLane?.index ?: "?"} → ${to?.name ?: "?"} №${toLane?.index ?: "?"} · $movementLabel",
+                                    style = MaterialTheme.typography.bodySmall)
+                                Row(modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    intersection.signalPlan?.phases.orEmpty().forEach { phase ->
+                                        val assigned = trajectory.connectionId in phase.greenConnectionIds
+                                        if (assigned) Button(onClick = {
+                                            val plan = intersection.signalPlan ?: SignalPlan()
+                                            updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map {
+                                                if (it.id == phase.id) it.copy(greenConnectionIds = it.greenConnectionIds - trajectory.connectionId) else it
+                                            })))
+                                        }) { Text("${phase.name} ✓") }
+                                        else OutlinedButton(onClick = {
+                                            val plan = intersection.signalPlan ?: SignalPlan()
+                                            updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map {
+                                                it.copy(greenConnectionIds = if (it.id == phase.id) it.greenConnectionIds + trajectory.connectionId
+                                                    else it.greenConnectionIds - trajectory.connectionId)
+                                            })))
+                                        }) { Text(phase.name) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    intersection.signalPlan?.phases.orEmpty().forEach { phase ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("${phase.name}: зелёный ${phase.greenSeconds} с, жёлтый ${phase.yellowSeconds} с, красный всех ${phase.allRedSeconds} с",
+                                modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(onClick = {
+                                val plan = intersection.signalPlan ?: SignalPlan()
+                                updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.filterNot { it.id == phase.id })))
+                            }) { Text("Удалить") }
+                        }
+                    }
+                    if (movementConflicts.isNotEmpty()) {
+                        Divider()
+                        Text("Оценка конфликтов с учётом фаз", style = MaterialTheme.typography.titleSmall)
+                        movementConflicts.take(10).forEach { conflict ->
+                            val status = when (conflict.signalStatus) {
+                                ConflictSignalStatus.SIMULTANEOUS_GREEN -> "ОДНОВРЕМЕННЫЙ ЗЕЛЁНЫЙ"
+                                ConflictSignalStatus.SEPARATED_BY_PHASE -> "РАЗДЕЛЁН ФАЗАМИ"
+                                ConflictSignalStatus.UNASSIGNED -> "НЕ НАЗНАЧЕНЫ ФАЗЫ"
+                                ConflictSignalStatus.NO_SIGNAL_PLAN -> "НЕТ ПЛАНА СВЕТОФОРА"
+                            }
+                            val firstKind = when (conflict.firstMovement) {
+                                MovementKind.THROUGH -> "прямо"
+                                MovementKind.LEFT -> "налево"
+                                MovementKind.RIGHT -> "направо"
+                                MovementKind.U_TURN -> "разворот"
+                                MovementKind.TRANSIT_ONLY -> "транзит"
+                            }
+                            val secondKind = when (conflict.secondMovement) {
+                                MovementKind.THROUGH -> "прямо"
+                                MovementKind.LEFT -> "налево"
+                                MovementKind.RIGHT -> "направо"
+                                MovementKind.U_TURN -> "разворот"
+                                MovementKind.TRANSIT_ONLY -> "транзит"
+                            }
+                            Text("$firstKind ↔ $secondKind: $status · точка (${"%.1f".format(conflict.point.xMeters)}, ${"%.1f".format(conflict.point.yMeters)}) м",
+                                color = if (conflict.signalStatus == ConflictSignalStatus.SIMULTANEOUS_GREEN)
+                                    MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (movementConflicts.size > 10) Text("И ещё ${movementConflicts.size - 10} пар…")
+                    }
+                    Text("Разные фазы считаются временным разделением только при однозначном назначении обеих траекторий. Жёлтый и общий красный хранятся как интервалы очистки между фазами; это не моделирует реальные циклы и задержки транспорта.",
                         style = MaterialTheme.typography.labelSmall)
                 }
             }
