@@ -54,6 +54,20 @@ object IntersectionGeometryEditor {
         if (intersection.approaches.map { it.id }.distinct().size != intersection.approaches.size) {
             add("Идентификаторы подходов должны быть уникальными")
         }
+        if (intersection.roadSegments.map { it.id }.distinct().size != intersection.roadSegments.size) {
+            add("Идентификаторы дорожных сегментов должны быть уникальными")
+        }
+        intersection.roadSegments.forEach { segment ->
+            if (segment.name.isBlank()) add("У дорожного сегмента отсутствует название")
+            if (segment.centerline.size < 2) add("Сегмент «${segment.name}» должен содержать минимум две точки")
+            if (!segment.widthMeters.isFinite() || segment.widthMeters !in 2.5..60.0) {
+                add("Некорректная ширина сегмента «${segment.name}»")
+            }
+            if (segment.laneCount !in 1..16) add("Некорректное количество полос сегмента «${segment.name}»")
+            if (segment.centerline.any { !it.xMeters.isFinite() || !it.yMeters.isFinite() }) {
+                add("Сегмент «${segment.name}» содержит некорректные координаты")
+            }
+        }
         intersection.approaches.forEach { approach ->
             if (approach.name.isBlank()) add("У одного из подходов отсутствует название")
             if (!approach.headingDegrees.isFinite()) add("Некорректный азимут подхода «${approach.name}»")
