@@ -34,7 +34,11 @@ data class VehicleModel(
     val frontOverhangMeters: Double,
     val rearOverhangMeters: Double,
     val articulationPointFromFrontMeters: Double? = null,
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+    /** Standstill bumper-to-bumper clearance used by the car-following model. */
+    val minimumGapMeters: Double = 2.0,
+    /** Desired time headway to the leader for IDM car-following. */
+    val desiredTimeHeadwaySeconds: Double = 1.5
 ) {
     init {
         require(lengthMeters > 0.0 && widthMeters > 0.0 && heightMeters > 0.0)
@@ -42,6 +46,8 @@ data class VehicleModel(
         require(maximumSpeedKmh >= 0.0)
         require(accelerationMetersPerSecondSquared >= 0.0)
         require(serviceDecelerationMetersPerSecondSquared >= 0.0)
+        require(minimumGapMeters >= 0.0)
+        require(desiredTimeHeadwaySeconds >= 0.0)
         require(frontOverhangMeters >= 0.0 && rearOverhangMeters >= 0.0)
         require(frontOverhangMeters + rearOverhangMeters < lengthMeters)
         require(articulationPointFromFrontMeters == null ||
