@@ -26,12 +26,11 @@ object IntersectionGeometryEditor {
         require(count in MIN_LANE_COUNT..MAX_LANE_COUNT) {
             "Количество полос должно быть от $MIN_LANE_COUNT до $MAX_LANE_COUNT"
         }
-        return intersection.copy(
-            approaches = intersection.approaches.map { approach ->
-                if (approach.id != approachId) approach
-                else approach.copy(lanes = resizeLanes(approach.lanes, count))
-            }
-        )
+        val updatedApproaches = intersection.approaches.map { approach ->
+            if (approach.id != approachId) approach
+            else approach.copy(lanes = resizeLanes(approach.lanes, count))
+        }
+        return pruneInvalidConnections(intersection, updatedApproaches)
     }
 
     fun changeLaneWidth(
@@ -62,14 +61,13 @@ object IntersectionGeometryEditor {
         movements: Set<MovementKind>
     ): Intersection {
         require(movements.isNotEmpty()) { "Для полосы должно быть задано хотя бы одно направление" }
-        return intersection.copy(
-            approaches = intersection.approaches.map { approach ->
-                if (approach.id != approachId) approach
-                else approach.copy(lanes = approach.lanes.map { lane ->
-                    if (lane.id == laneId) lane.copy(allowedMovements = movements) else lane
-                })
-            }
-        )
+        val updatedApproaches = intersection.approaches.map { approach ->
+            if (approach.id != approachId) approach
+            else approach.copy(lanes = approach.lanes.map { lane ->
+                if (lane.id == laneId) lane.copy(allowedMovements = movements) else lane
+            })
+        }
+        return pruneInvalidConnections(intersection, updatedApproaches)
     }
 
     fun setLaneFlowDirection(
@@ -84,14 +82,7 @@ object IntersectionGeometryEditor {
                 if (lane.id == laneId) lane.copy(flowDirection = direction) else lane
             })
         }
-        val laneLookup = updatedApproaches.flatMap { approach ->
-            approach.lanes.map { lane -> (approach.id to lane.id) to lane }
-        }.toMap()
-        val validConnections = intersection.laneConnections.filter { connection ->
-            laneLookup[connection.fromApproachId to connection.fromLaneId]?.flowDirection == LaneFlowDirection.INTO_INTERSECTION &&
-                laneLookup[connection.toApproachId to connection.toLaneId]?.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION
-        }
-        return intersection.copy(approaches = updatedApproaches, laneConnections = validConnections)
+        return pruneInvalidConnections(intersection, updatedApproaches)
     }
 
     fun addLaneConnection(intersection: Intersection, connection: LaneConnection): Intersection {
@@ -106,6 +97,12 @@ object IntersectionGeometryEditor {
         }
         require(target.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION) {
             "Целевая полоса должна быть направлена от перекрёстка"
+        }
+        val sourceApproach = intersection.approaches.first { it.id == connection.fromApproachId }
+        val targetApproach = intersection.approaches.first { it.id == connection.toApproachId }
+        val movement = classifyMovement(sourceApproach, targetApproach)
+        require(movement in source.allowedMovements) {
+            "Манёвр «${movementLabel(movement)}» запрещён для исходной полосы"
         }
         require(connection.fromApproachId != connection.toApproachId || connection.fromLaneId != connection.toLaneId) {
             "Нельзя соединить полосу саму с собой"
@@ -228,6 +225,16 @@ object IntersectionGeometryEditor {
             else if (source.flowDirection != LaneFlowDirection.INTO_INTERSECTION) add("Исходная полоса связи не направлена к перекрёстку")
             if (target == null) add("Связь полосы ссылается на отсутствующую выездную полосу")
             else if (target.flowDirection != LaneFlowDirection.OUT_OF_INTERSECTION) add("Целевая полоса связи не направлена от перекрёстка")
+            if (source != null) {
+                val from = intersection.approaches.firstOrNull { it.id == connection.fromApproachId }
+                val to = intersection.approaches.firstOrNull { it.id == connection.toApproachId }
+                if (from != null && to != null) {
+                    val movement = classifyMovement(from, to)
+                    if (movement !in source.allowedMovements) {
+                        add("Связь полосы использует запрещённый манёвр «${movementLabel(movement)}»")
+                    }
+                }
+            }
         }
         intersection.signalPlan?.let { plan ->
             val connectionIds = intersection.laneConnections.map { it.id }.toSet()
@@ -291,6 +298,60 @@ object IntersectionGeometryEditor {
                 }
             }
         }
+    }
+
+    /**
+     * Keep lane-to-lane movements and their signal assignments consistent when
+     * a lane is resized, reversed, or its permitted turns are edited.
+     */
+    private fun pruneInvalidConnections(
+        intersection: Intersection,
+        approaches: List<Approach>
+    ): Intersection {
+        val validConnections = intersection.laneConnections.filter { connection ->
+            val from = approaches.firstOrNull { it.id == connection.fromApproachId }
+            val to = approaches.firstOrNull { it.id == connection.toApproachId }
+            val source = from?.lanes?.firstOrNull { it.id == connection.fromLaneId }
+            val target = to?.lanes?.firstOrNull { it.id == connection.toLaneId }
+            source?.flowDirection == LaneFlowDirection.INTO_INTERSECTION &&
+                target?.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION &&
+                from != null && to != null && classifyMovement(from, to) in source.allowedMovements
+        }
+        val validIds = validConnections.map { it.id }.toSet()
+        val updatedPlan = intersection.signalPlan?.copy(
+            phases = intersection.signalPlan.phases.map { phase ->
+                phase.copy(greenConnectionIds = phase.greenConnectionIds.intersect(validIds))
+            }
+        )
+        return intersection.copy(
+            approaches = approaches,
+            laneConnections = validConnections,
+            signalPlan = updatedPlan
+        )
+    }
+
+    private fun classifyMovement(from: Approach, to: Approach): MovementKind {
+        val incomingHeading = normalizeDegrees(from.headingDegrees + 180.0)
+        val delta = signedAngle(incomingHeading, normalizeDegrees(to.headingDegrees))
+        return when {
+            kotlin.math.abs(delta) <= 30.0 -> MovementKind.THROUGH
+            kotlin.math.abs(delta) >= 150.0 -> MovementKind.U_TURN
+            delta > 0.0 -> MovementKind.RIGHT
+            else -> MovementKind.LEFT
+        }
+    }
+
+    private fun normalizeDegrees(value: Double): Double = ((value % 360.0) + 360.0) % 360.0
+
+    private fun signedAngle(from: Double, to: Double): Double =
+        ((to - from + 540.0) % 360.0) - 180.0
+
+    private fun movementLabel(movement: MovementKind): String = when (movement) {
+        MovementKind.THROUGH -> "прямо"
+        MovementKind.LEFT -> "налево"
+        MovementKind.RIGHT -> "направо"
+        MovementKind.U_TURN -> "разворот"
+        MovementKind.TRANSIT_ONLY -> "общественный транспорт"
     }
 
     private fun resizeLanes(existing: List<Lane>, count: Int): List<Lane> =
