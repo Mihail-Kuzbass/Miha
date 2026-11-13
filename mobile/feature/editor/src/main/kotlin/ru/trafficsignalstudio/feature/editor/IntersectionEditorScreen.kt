@@ -127,7 +127,8 @@ fun IntersectionEditorScreen(
                             val current = intersection.roadSegments.firstOrNull { it.id == segmentId }
                             if (current != null && pointIndex in current.centerline.indices) {
                                 val changed = current.copy(centerline = current.centerline.toMutableList().also { it[pointIndex] = point })
-                                updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map { if (it.id == segmentId) changed else it }))
+                                val changedSegments = intersection.roadSegments.map { if (it.id == segmentId) changed else it }
+                                updateIntersection(intersection.copy(roadSegments = changedSegments, junctionNodes = rebuildJunctionNodes(changedSegments)))
                             }
                         }
                     )
@@ -205,7 +206,7 @@ fun IntersectionEditorScreen(
                                 ))
                                 pendingPoints.clear()
                             }
-                        }, enabled = if (islandDrawingMode) pendingPoints.size >= 3 else pendingPoints.size >= 2) { Text(if (islandDrawingMode) "Завершить островок" else "Завершить линию") }
+                        }, enabled = if (islandDrawingMode || drawingTool == DrawingTool.ARC) pendingPoints.size >= 3 else pendingPoints.size >= 2) { Text(if (islandDrawingMode) "Завершить островок" else "Завершить линию") }
                     }
                     if (!editMode) Text("Для дуги задайте 3 точки: начало, контрольную и конец. Мост рисуется на верхнем уровне.")
                     val selectedSegment = intersection.roadSegments.firstOrNull { it.id == selectedRoadSegmentId }
