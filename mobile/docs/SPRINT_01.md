@@ -18,7 +18,7 @@
 Ручное изменение геометрии на Canvas, расчёт конфликтов, светофорные фазы, микросимуляция, координация, импорт OSM/2ГИС и нормативное заключение.
 
 ## Версии
-AGP 9.5.0; Gradle 9.9.1; Kotlin 2.4.20; Compose BOM 2026.09.00; compileSdk 37; targetSdk 36; minSdk 29; Java 17. Версии зафиксированы в version catalog и должны быть проверены локальным Gradle Sync.
+AGP 9.5.0; Gradle 9.7.0; Kotlin 2.4.20 для чистых JVM-модулей и Compose Compiler; Compose BOM 2026.09.00; compileSdk 37; targetSdk 36; minSdk 29; Java 17. Android-модули используют встроенную поддержку Kotlin в AGP 9.x. Версии зафиксированы в version catalog и должны быть проверены локальным Gradle Sync.
 
 ## Критерии приёмки
 - [ ] Gradle Sync без ошибок.
