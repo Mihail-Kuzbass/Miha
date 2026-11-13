@@ -326,7 +326,11 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
         TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection)
     }
     Canvas(modifier = Modifier.fillMaxWidth().height(280.dp).background(Color(0xFF263238))) {
-        val allPoints = trajectories.flatMap { it.points }
+        val trajectoryById = trajectories.associateBy { it.connectionId }
+        val vehiclePoints = snapshot?.activeVehicles.orEmpty().mapNotNull { vehicle ->
+            trajectoryById[vehicle.connectionId]?.let { pointAtProgress(it.points, vehicle.progress) }
+        }
+        val allPoints = trajectories.flatMap { it.points } + vehiclePoints
         if (allPoints.isEmpty()) return@Canvas
         val minX = allPoints.minOf { it.xMeters }; val maxX = allPoints.maxOf { it.xMeters }
         val minY = allPoints.minOf { it.yMeters }; val maxY = allPoints.maxOf { it.yMeters }
@@ -346,7 +350,7 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
             drawPath(path, Color(0xFFB0BEC5).copy(alpha = 0.65f), style = Stroke(width = 5f))
         }
         snapshot?.activeVehicles?.forEach { vehicle ->
-            val trajectory = trajectories.firstOrNull { it.connectionId == vehicle.connectionId } ?: return@forEach
+            val trajectory = trajectoryById[vehicle.connectionId] ?: return@forEach
             val point = pointAtProgress(trajectory.points, vehicle.progress)
             val center = map(point)
             val model = vehicle.vehicleClass?.let { cls ->
@@ -354,8 +358,8 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
             } ?: VehicleModelCatalog.defaultPassengerCar
             val color = vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
             val heading = headingAtProgress(trajectory.points, vehicle.progress)
-            val bodyLength = (model.lengthMeters.toFloat() * scale).coerceIn(7f, 22f)
-            val bodyWidth = (model.widthMeters.toFloat() * scale).coerceIn(4f, 9f)
+            val bodyLength = (vehicle.lengthMeters.toFloat() * scale).coerceIn(4f, 80f)
+            val bodyWidth = (vehicle.widthMeters.toFloat() * scale).coerceIn(2.5f, 16f)
             rotate(heading, center) {
                 drawRoundRect(
                     color = color,
