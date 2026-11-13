@@ -190,6 +190,12 @@ fun IntersectionEditorScreen(
                         }
                     )
                     Text(
+                        text = "Линейный масштаб: 5 м",
+                        modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White
+                    )
+                    Text(
                         text = intersection.name,
                         modifier = Modifier.align(Alignment.TopCenter).padding(8.dp),
                         style = MaterialTheme.typography.labelLarge
@@ -241,6 +247,9 @@ fun IntersectionEditorScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (!editMode) Button(onClick = { editMode = true; pendingPoints.clear(); islandDrawingMode = false }) { Text("Редактировать") }
                         else Button(onClick = { editMode = false }) { Text("Рисовать") }
+                        OutlinedButton(onClick = { viewportZoom = (viewportZoom / 1.25f).coerceAtLeast(0.35f) }) { Text("−") }
+                        Text("${(viewportZoom * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+                        OutlinedButton(onClick = { viewportZoom = (viewportZoom * 1.25f).coerceAtMost(4f) }) { Text("+") }
                         OutlinedButton(onClick = { viewportZoom = 1f; viewportPan = Offset.Zero }) { Text("Сброс вида") }
                     }
                     if (!editMode) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -847,7 +856,7 @@ private fun IntersectionGeometryPreview(
         .background(Color(0xFFE8EEE8), RoundedCornerShape(12.dp))
         .pointerInput(intersection.id, drawingTool, editMode, selectedSegmentId, zoom, pan) {
             detectTapGestures { offset ->
-                val factor = (minOf(size.width, size.height) * 0.28f / 14.0f * zoom * 0.35f).coerceAtLeast(0.0001f)
+                val factor = (minOf(size.width, size.height) * 0.28f / 14.0f * zoom).coerceAtLeast(0.0001f)
                 if (editMode) {
                     val center = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
                     val nearest = intersection.roadSegments.mapNotNull { segment ->
@@ -870,7 +879,7 @@ private fun IntersectionGeometryPreview(
                 var draggedIndex = -1
                 detectDragGestures(onDragStart = { start ->
                     val segment = intersection.roadSegments.firstOrNull { it.id == selectedSegmentId }
-                    val factor = minOf(size.width, size.height) * 0.28f / 14.0f * zoom * 0.35f
+                    val factor = minOf(size.width, size.height) * 0.28f / 14.0f * zoom
                     val center = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
                     draggedIndex = segment?.centerline?.indices?.minByOrNull { index ->
                         val p = segment.centerline[index]
@@ -879,7 +888,7 @@ private fun IntersectionGeometryPreview(
                 }, onDrag = { change, _ ->
                     val segment = intersection.roadSegments.firstOrNull { it.id == selectedSegmentId }
                     if (segment != null && draggedIndex in segment.centerline.indices) {
-                        val factor = (minOf(size.width, size.height) * 0.28f / 14.0f * zoom * 0.35f).coerceAtLeast(0.0001f)
+                        val factor = (minOf(size.width, size.height) * 0.28f / 14.0f * zoom).coerceAtLeast(0.0001f)
                         val old = segment.centerline[draggedIndex]
                         onMovePoint(segment.id, draggedIndex, Point2D(old.xMeters + change.positionChange().x / factor,
                             old.yMeters - change.positionChange().y / factor))
@@ -916,8 +925,8 @@ private fun IntersectionGeometryPreview(
             if (island.boundary.size >= 3) {
                 val islandPath = Path().apply {
                     val first = island.boundary.first()
-                    moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f, center.y - first.yMeters.toFloat() * scale * 0.35f)
-                    island.boundary.drop(1).forEach { p -> lineTo(center.x + p.xMeters.toFloat() * scale * 0.35f, center.y - p.yMeters.toFloat() * scale * 0.35f) }
+                    moveTo(center.x + first.xMeters.toFloat() * scale, center.y - first.yMeters.toFloat() * scale)
+                    island.boundary.drop(1).forEach { p -> lineTo(center.x + p.xMeters.toFloat() * scale, center.y - p.yMeters.toFloat() * scale) }
                     close()
                 }
                 drawPath(islandPath, Color(0xFFB7C9A5))
@@ -925,13 +934,13 @@ private fun IntersectionGeometryPreview(
             }
         }
         intersection.junctionNodes.forEach { node ->
-            drawCircle(Color(0xFFFFC107), 5f, Offset(center.x + node.point.xMeters.toFloat() * scale * 0.35f, center.y - node.point.yMeters.toFloat() * scale * 0.35f))
+            drawCircle(Color(0xFFFFC107), 5f, Offset(center.x + node.point.xMeters.toFloat() * scale, center.y - node.point.yMeters.toFloat() * scale))
         }
         intersection.roadSegments.sortedBy { it.elevationLevel }.forEach { segment ->
             if (segment.centerline.size >= 2) {
                 val screenPoints = segment.centerline.map { point ->
-                    Offset(center.x + point.xMeters.toFloat() * scale * 0.35f,
-                        center.y - point.yMeters.toFloat() * scale * 0.35f)
+                    Offset(center.x + point.xMeters.toFloat() * scale,
+                        center.y - point.yMeters.toFloat() * scale)
                 }
                 val path = Path().apply {
                     moveTo(screenPoints.first().x, screenPoints.first().y)
@@ -942,7 +951,7 @@ private fun IntersectionGeometryPreview(
                         screenPoints.drop(1).forEach { lineTo(it.x, it.y) }
                     }
                 }
-                val width = (segment.widthMeters.toFloat() * scale * 0.35f).coerceAtLeast(10f)
+                val width = (segment.widthMeters.toFloat() * scale).coerceAtLeast(10f)
                 val roundStroke = Stroke(width = width, cap = StrokeCap.Round,
                     join = androidx.compose.ui.graphics.StrokeJoin.Round)
                 if (segment.elevationLevel > 0 || segment.kind == RoadSegmentKind.BRIDGE) {
@@ -960,8 +969,8 @@ private fun IntersectionGeometryPreview(
                 segmentLanes.dropLast(1).forEach { lane ->
                     laneOffset += lane.widthMeters
                     val boundaryPoints = offsetRoadPolyline(segment.centerline, laneOffset).map { point ->
-                        Offset(center.x + point.xMeters.toFloat() * scale * 0.35f,
-                            center.y - point.yMeters.toFloat() * scale * 0.35f)
+                        Offset(center.x + point.xMeters.toFloat() * scale,
+                            center.y - point.yMeters.toFloat() * scale)
                     }
                     val boundaryPath = Path().apply {
                         moveTo(boundaryPoints.first().x, boundaryPoints.first().y)
@@ -984,9 +993,9 @@ private fun IntersectionGeometryPreview(
                         val length = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001f)
                         val ux = dx / length
                         val uy = dy / length
-                        val p = Offset(center.x + ((a.xMeters + b.xMeters) / 2.0).toFloat() * scale * 0.35f,
-                            center.y - ((a.yMeters + b.yMeters) / 2.0).toFloat() * scale * 0.35f)
-                        val lanePixelWidth = (lane.widthMeters * scale * 0.35f).toFloat()
+                        val p = Offset(center.x + ((a.xMeters + b.xMeters) / 2.0).toFloat() * scale,
+                            center.y - ((a.yMeters + b.yMeters) / 2.0).toFloat() * scale)
+                        val lanePixelWidth = (lane.widthMeters * scale).toFloat()
                         val iconSize = min(15f, lanePixelWidth * 0.72f).coerceAtLeast(7f)
                         val movements = lane.allowedMovements
                             .filter { it == MovementKind.THROUGH || it == MovementKind.LEFT ||
@@ -1084,11 +1093,11 @@ private fun IntersectionGeometryPreview(
         movementTrajectories.forEach { trajectory ->
             val path = Path().apply {
                 val first = trajectory.points.first()
-                moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f,
-                    center.y - first.yMeters.toFloat() * scale * 0.35f)
+                moveTo(center.x + first.xMeters.toFloat() * scale,
+                    center.y - first.yMeters.toFloat() * scale)
                 trajectory.points.drop(1).forEach { point ->
-                    lineTo(center.x + point.xMeters.toFloat() * scale * 0.35f,
-                        center.y - point.yMeters.toFloat() * scale * 0.35f)
+                    lineTo(center.x + point.xMeters.toFloat() * scale,
+                        center.y - point.yMeters.toFloat() * scale)
                 }
             }
             val hasSimultaneousConflict = movementConflicts.any {
@@ -1117,11 +1126,11 @@ private fun IntersectionGeometryPreview(
                 val articulationAngle = ((articulationHeading - markerHeading + 540f) % 360f - 180f)
                     .coerceIn(-30f, 30f)
                 val markerCenter = Offset(
-                    center.x + markerPoint.xMeters.toFloat() * scale * 0.35f,
-                    center.y - markerPoint.yMeters.toFloat() * scale * 0.35f
+                    center.x + markerPoint.xMeters.toFloat() * scale,
+                    center.y - markerPoint.yMeters.toFloat() * scale
                 )
                 drawVehicleGlyph(
-                    markerCenter, markerHeading, scale * 0.35f, vehicleModel,
+                    markerCenter, markerHeading, scale, vehicleModel,
                     articulationAngleDegrees = articulationAngle
                 )
                 val before = trajectory.points[trajectory.points.lastIndex - 1]
@@ -1131,8 +1140,8 @@ private fun IntersectionGeometryPreview(
                 val length = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001f)
                 val ux = dx / length
                 val uy = dy / length
-                val end = Offset(center.x + tip.xMeters.toFloat() * scale * 0.35f,
-                    center.y - tip.yMeters.toFloat() * scale * 0.35f)
+                val end = Offset(center.x + tip.xMeters.toFloat() * scale,
+                    center.y - tip.yMeters.toFloat() * scale)
                 val base = Offset(end.x - ux * 10f, end.y - uy * 10f)
                 drawLine(routeColor, end, Offset(base.x - uy * 5f, base.y + ux * 5f), 3f, cap = StrokeCap.Round)
                 drawLine(routeColor, end, Offset(base.x + uy * 5f, base.y - ux * 5f), 3f, cap = StrokeCap.Round)
@@ -1154,11 +1163,11 @@ private fun IntersectionGeometryPreview(
         if (pendingPoints.isNotEmpty()) {
             val draft = Path().apply {
                 val first = pendingPoints.first()
-                moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f,
-                    center.y - first.yMeters.toFloat() * scale * 0.35f)
+                moveTo(center.x + first.xMeters.toFloat() * scale,
+                    center.y - first.yMeters.toFloat() * scale)
                 pendingPoints.drop(1).forEach { point ->
-                    lineTo(center.x + point.xMeters.toFloat() * scale * 0.35f,
-                        center.y - point.yMeters.toFloat() * scale * 0.35f)
+                    lineTo(center.x + point.xMeters.toFloat() * scale,
+                        center.y - point.yMeters.toFloat() * scale)
                 }
             }
             drawPath(draft, Color(0xFF1976D2),
@@ -1167,8 +1176,8 @@ private fun IntersectionGeometryPreview(
                     pathEffect = if (drawingTool == DrawingTool.ARC) dash else null))
             pendingPoints.forEach { point ->
                 drawCircle(Color(0xFF1976D2), radius = 6f,
-                    center = Offset(center.x + point.xMeters.toFloat() * scale * 0.35f,
-                        center.y - point.yMeters.toFloat() * scale * 0.35f))
+                    center = Offset(center.x + point.xMeters.toFloat() * scale,
+                        center.y - point.yMeters.toFloat() * scale))
             }
         }
 
@@ -1176,10 +1185,18 @@ private fun IntersectionGeometryPreview(
         if (editMode && selectedSegmentId != null) {
             intersection.roadSegments.firstOrNull { it.id == selectedSegmentId }?.centerline?.forEach { point ->
                 drawCircle(Color(0xFFFF9800), radius = 8f,
-                    center = Offset(center.x + point.xMeters.toFloat() * scale * 0.35f,
-                        center.y - point.yMeters.toFloat() * scale * 0.35f))
+                    center = Offset(center.x + point.xMeters.toFloat() * scale,
+                        center.y - point.yMeters.toFloat() * scale))
             }
         }
+        // One shared world-to-screen conversion: all geometry is authored in metres.
+        // The ruler therefore remains tied to the same scale as lane widths and vehicle bodies.
+        val rulerStart = Offset(16f, size.height - 18f)
+        val rulerEnd = Offset(rulerStart.x + 5f * scale, rulerStart.y)
+        drawLine(Color.White, rulerStart, rulerEnd, strokeWidth = 4f)
+        drawLine(Color(0xFF263238), rulerStart, rulerEnd, strokeWidth = 1.5f)
+        drawLine(Color.White, Offset(rulerStart.x, rulerStart.y - 5f), Offset(rulerStart.x, rulerStart.y + 5f), strokeWidth = 2f)
+        drawLine(Color.White, Offset(rulerEnd.x, rulerEnd.y - 5f), Offset(rulerEnd.x, rulerEnd.y + 5f), strokeWidth = 2f)
         drawCircle(Color(0xFF20262D), radius = 4f, center = center, style = Stroke(width = 2f))
     }
 }
