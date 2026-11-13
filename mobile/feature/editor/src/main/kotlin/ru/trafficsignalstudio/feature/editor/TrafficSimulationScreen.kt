@@ -544,7 +544,8 @@ private fun TrafficSimulationCanvas(
                     sourcePoint.yMeters + (targetPoint.yMeters - sourcePoint.yMeters) * blend
                 )
             }
-            val center = map(point)
+            val displacedPoint = offsetPointAtProgress(trajectory.points, vehicle.progress, vehicle.passingOffsetMeters, point)
+            val center = map(displacedPoint)
             val color = if (vehicle.isCrashed) Color(0xFFE53935) else vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
             val heading = headingAtProgress(trajectory.points, vehicle.progress)
             // Preserve the real model dimensions at the current world-to-screen scale.
@@ -573,6 +574,37 @@ private fun TrafficSimulationCanvas(
             }
         }
     }
+}
+
+
+private fun offsetPointAtProgress(
+    points: List<ru.trafficsignalstudio.model.Point2D>,
+    progress: Double,
+    lateralOffsetMeters: Double,
+    basePoint: ru.trafficsignalstudio.model.Point2D
+): ru.trafficsignalstudio.model.Point2D {
+    if (kotlin.math.abs(lateralOffsetMeters) < 1e-6 || points.size < 2) return basePoint
+    val lengths = points.zipWithNext().map { (a, b) -> hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters) }
+    val total = lengths.sum().coerceAtLeast(1e-6)
+    var distance = progress * total
+    var index = 0
+    if (distance < 0.0) index = 0
+    else {
+        while (index < lengths.lastIndex && distance > lengths[index]) {
+            distance -= lengths[index]
+            index++
+        }
+        if (distance > lengths.last()) index = lengths.lastIndex
+    }
+    val a = points[index]
+    val b = points[index + 1]
+    val length = lengths[index].coerceAtLeast(1e-6)
+    val dx = (b.xMeters - a.xMeters) / length
+    val dy = (b.yMeters - a.yMeters) / length
+    return ru.trafficsignalstudio.model.Point2D(
+        basePoint.xMeters - dy * lateralOffsetMeters,
+        basePoint.yMeters + dx * lateralOffsetMeters
+    )
 }
 
 private fun headingAtProgress(points: List<ru.trafficsignalstudio.model.Point2D>, progress: Double): Float {

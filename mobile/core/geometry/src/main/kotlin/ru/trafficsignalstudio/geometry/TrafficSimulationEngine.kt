@@ -71,7 +71,9 @@ data class SimulatedVehicle(
     /** Previous lane's movement path while the lateral manoeuvre is in progress. */
     val laneChangeFromConnectionId: String? = null,
     val laneChangeProgress: Double = 1.0,
-    val isCrashed: Boolean = false
+    val isCrashed: Boolean = false,
+    /** Lateral displacement into the opposing lane while passing an incident. */
+    val passingOffsetMeters: Double = 0.0
 )
 
 data class MovementSimulationMetrics(
@@ -95,6 +97,8 @@ data class CategorySimulationMetrics(
     val averageDelaySeconds: Double
 )
 
+enum class CrashIncidentCause { RISK_SCENARIO, PHYSICAL_CONTACT }
+
 data class CrashIncident(
     val id: Int,
     val timeSeconds: Double,
@@ -102,7 +106,8 @@ data class CrashIncident(
     val type: CrashRiskBand,
     val participants: Int,
     val affectedConnectionIds: Set<String>,
-    val point: Point2D
+    val point: Point2D,
+    val cause: CrashIncidentCause = CrashIncidentCause.RISK_SCENARIO
 )
 
 data class TrafficSimulationSnapshot(
@@ -174,7 +179,8 @@ object TrafficSimulationEngine {
         var laneChangeFromConnectionId: String? = null,
         var laneChangeProgress: Double = 1.0,
         var crashedUntilSeconds: Double? = null,
-        var crashIncidentId: Int? = null
+        var crashIncidentId: Int? = null,
+        var passingOffsetMeters: Double = 0.0
     )
 
     private class MovementState(
@@ -345,6 +351,168 @@ object TrafficSimulationEngine {
                     speed * closingSpeed / (2.0 * sqrt(acceleration * deceleration)))
             val interaction = (dynamicGap / gap) * (dynamicGap / gap)
             return (acceleration * (1.0 - freeRoadTerm - interaction)).coerceIn(-deceleration, acceleration)
+        }
+
+
+        fun worldPose(
+            state: MovementState,
+            vehicle: VehicleAgent,
+            positionMeters: Double = vehicle.positionMeters,
+            lateralOffsetMeters: Double = vehicle.passingOffsetMeters
+        ): Pair<Point2D, Point2D> {
+            val points = trajectories.getValue(state.connectionId).points
+            val centerDistance = positionMeters - vehicle.waiting.model.lengthMeters / 2.0
+            val progress = centerDistance / state.pathLengthMeters
+            val lengths = points.zipWithNext().map { (a, b) -> hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters) }
+            var distanceAlong = progress * lengths.sum().coerceAtLeast(1e-6)
+            var segmentIndex = 0
+            if (distanceAlong < 0.0) {
+                segmentIndex = 0
+            } else {
+                while (segmentIndex < lengths.lastIndex && distanceAlong > lengths[segmentIndex]) {
+                    distanceAlong -= lengths[segmentIndex]
+                    segmentIndex++
+                }
+                if (distanceAlong > lengths.last()) {
+                    segmentIndex = lengths.lastIndex
+                    distanceAlong = lengths.last() + distanceAlong - lengths.last()
+                }
+            }
+            val a = points[segmentIndex]
+            val b = points[segmentIndex + 1]
+            val segmentLength = lengths[segmentIndex].coerceAtLeast(1e-6)
+            val ratio = if (progress < 0.0) distanceAlong / segmentLength
+                else (distanceAlong / segmentLength).coerceIn(0.0, 1.0)
+            val dx = (b.xMeters - a.xMeters) / segmentLength
+            val dy = (b.yMeters - a.yMeters) / segmentLength
+            val base = Point2D(a.xMeters + (b.xMeters - a.xMeters) * ratio,
+                a.yMeters + (b.yMeters - a.yMeters) * ratio)
+            val shifted = Point2D(
+                base.xMeters - dy * lateralOffsetMeters,
+                base.yMeters + dx * lateralOffsetMeters
+            )
+            return shifted to Point2D(dx, dy)
+        }
+
+        fun opposingGapIsSafe(
+            state: MovementState,
+            vehicle: VehicleAgent,
+            passDistanceMeters: Double,
+            targetOffsetMeters: Double
+        ): Boolean {
+            val ownPose = worldPose(state, vehicle, lateralOffsetMeters = targetOffsetMeters)
+            val tangent = ownPose.second
+            val sourceHeading = intersection.approaches.firstOrNull { it.id == state.fromApproachId }?.headingDegrees
+                ?: return false
+            val sourceLane = approachLanes[state.fromApproachId]?.get(state.fromLaneId) ?: return false
+            val lateralLimit = sourceLane.widthMeters * 1.6 + vehicle.waiting.model.widthMeters
+            val opposingApproaches = intersection.approaches.filter { approach ->
+                val difference = ((approach.headingDegrees - sourceHeading + 540.0) % 360.0) - 180.0
+                kotlin.math.abs(kotlin.math.abs(difference) - 180.0) <= 25.0
+            }.map { it.id }.toSet()
+            val requiredClearance = passDistanceMeters +
+                vehicle.speedMetersPerSecond * 2.0 + vehicle.waiting.model.lengthMeters + 5.0
+            return states.values.filter { it.fromApproachId in opposingApproaches }.all { opposingState ->
+                opposingState.vehicles.filter { it.crashedUntilSeconds == null }.all { oncoming ->
+                    val oncomingPose = worldPose(opposingState, oncoming)
+                    val dx = oncomingPose.first.xMeters - ownPose.first.xMeters
+                    val dy = oncomingPose.first.yMeters - ownPose.first.yMeters
+                    val along = dx * tangent.xMeters + dy * tangent.yMeters
+                    val lateral = kotlin.math.abs(-dx * tangent.yMeters + dy * tangent.xMeters)
+                    if (along <= 0.0 || lateral > lateralLimit) true
+                    else {
+                        val required = requiredClearance +
+                            (vehicle.speedMetersPerSecond + oncoming.speedMetersPerSecond) * 2.0 +
+                            oncoming.waiting.model.lengthMeters
+                        along >= required
+                    }
+                }
+            }
+        }
+
+        fun rectanglesOverlap(
+            firstCenter: Point2D,
+            firstDirection: Point2D,
+            firstLength: Double,
+            firstWidth: Double,
+            secondCenter: Point2D,
+            secondDirection: Point2D,
+            secondLength: Double,
+            secondWidth: Double
+        ): Boolean {
+            fun corners(center: Point2D, direction: Point2D, length: Double, width: Double): List<Point2D> {
+                val halfLength = length / 2.0
+                val halfWidth = width / 2.0
+                val normalX = -direction.yMeters
+                val normalY = direction.xMeters
+                return listOf(
+                    Point2D(center.xMeters + direction.xMeters * halfLength + normalX * halfWidth,
+                        center.yMeters + direction.yMeters * halfLength + normalY * halfWidth),
+                    Point2D(center.xMeters + direction.xMeters * halfLength - normalX * halfWidth,
+                        center.yMeters + direction.yMeters * halfLength - normalY * halfWidth),
+                    Point2D(center.xMeters - direction.xMeters * halfLength + normalX * halfWidth,
+                        center.yMeters - direction.yMeters * halfLength + normalY * halfWidth),
+                    Point2D(center.xMeters - direction.xMeters * halfLength - normalX * halfWidth,
+                        center.yMeters - direction.yMeters * halfLength - normalY * halfWidth)
+                )
+            }
+            val first = corners(firstCenter, firstDirection, firstLength, firstWidth)
+            val second = corners(secondCenter, secondDirection, secondLength, secondWidth)
+            val firstNormal = Point2D(-firstDirection.yMeters, firstDirection.xMeters)
+            val secondNormal = Point2D(-secondDirection.yMeters, secondDirection.xMeters)
+            val axes = listOf(firstDirection, firstNormal, secondDirection, secondNormal)
+            return axes.all { axis ->
+                val firstProjection = first.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
+                val secondProjection = second.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
+                firstProjection.max() >= secondProjection.min() - 0.02 &&
+                    secondProjection.max() >= firstProjection.min() - 0.02
+            }
+        }
+
+        fun detectPhysicalContactCollisions() {
+            val active = states.values.flatMap { state ->
+                state.vehicles.filter { it.crashedUntilSeconds == null }.map { state to it }
+            }
+            for (i in active.indices) {
+                val (firstState, firstVehicle) = active[i]
+                if (firstVehicle.crashedUntilSeconds != null) continue
+                for (j in i + 1 until active.size) {
+                    val (secondState, secondVehicle) = active[j]
+                    if (secondVehicle.crashedUntilSeconds != null) continue
+                    if (firstVehicle.waiting.id == secondVehicle.waiting.id) continue
+                    val firstPose = worldPose(firstState, firstVehicle)
+                    val secondPose = worldPose(secondState, secondVehicle)
+                    if (!rectanglesOverlap(
+                        firstPose.first, firstPose.second,
+                        firstVehicle.waiting.model.lengthMeters, firstVehicle.waiting.model.widthMeters,
+                        secondPose.first, secondPose.second,
+                        secondVehicle.waiting.model.lengthMeters, secondVehicle.waiting.model.widthMeters
+                    )) continue
+
+                    val incidentId = incidents.size + 1
+                    val clearedAt = time + random.nextDouble(45.0, 121.0)
+                    firstVehicle.crashedUntilSeconds = clearedAt
+                    secondVehicle.crashedUntilSeconds = clearedAt
+                    firstVehicle.crashIncidentId = incidentId
+                    secondVehicle.crashIncidentId = incidentId
+                    firstVehicle.speedMetersPerSecond = 0.0
+                    secondVehicle.speedMetersPerSecond = 0.0
+                    val affected = setOf(firstState.connectionId, secondState.connectionId)
+                    affected.forEach { blockedUntilByConnection[it] = clearedAt }
+                    incidents += CrashIncident(
+                        incidentId, time, clearedAt,
+                        if (riskAssessment.band == CrashRiskBand.NO_CRASH)
+                            CrashRiskBand.INTERSECTION_CONFLICT else riskAssessment.band,
+                        2, affected,
+                        Point2D(
+                            (firstPose.first.xMeters + secondPose.first.xMeters) / 2.0,
+                            (firstPose.first.yMeters + secondPose.first.yMeters) / 2.0
+                        ),
+                        CrashIncidentCause.PHYSICAL_CONTACT
+                    )
+                    diagnostics += "ДТП зарегистрировано по фактическому соприкосновению габаритов автомобилей; затронутые траектории временно заблокированы."
+                }
+            }
         }
 
         fun tryCreateIncident() {
@@ -530,6 +698,41 @@ object TrafficSimulationEngine {
                 }
             }
 
+
+            // Detour around a stopped crash obstacle by temporarily using the opposing lane.
+            // A vehicle may enter it only when the full passing distance plus an oncoming safety
+            // margin is available; otherwise it remains queued behind the incident.
+            laneGroups.values.forEach { group ->
+                val laneAgents = group.flatMap { it.vehicles }
+                group.forEach { sourceState ->
+                    val sourceLane = approachLanes[sourceState.fromApproachId]?.get(sourceState.fromLaneId)
+                        ?: return@forEach
+                    sourceState.vehicles.forEach { vehicle ->
+                        if (vehicle.crashedUntilSeconds != null || vehicle.positionMeters > 0.0) return@forEach
+                        val obstacle = laneAgents.filter {
+                            it !== vehicle && it.crashedUntilSeconds?.let { until -> time < until } == true &&
+                                it.positionMeters > vehicle.positionMeters
+                        }.minByOrNull { it.positionMeters }
+                        val alreadyPassing = vehicle.passingOffsetMeters > 0.25
+                        val clearOfObstacle = obstacle == null ||
+                            vehicle.positionMeters > obstacle.positionMeters + vehicle.waiting.model.lengthMeters + 5.0
+                        val desiredOffset = when {
+                            alreadyPassing && !clearOfObstacle -> sourceLane.widthMeters
+                            obstacle != null && isBlocked(sourceState.connectionId, time) -> {
+                                val passDistance = (obstacle.positionMeters - vehicle.positionMeters +
+                                    vehicle.waiting.model.lengthMeters + 5.0).coerceAtLeast(0.0)
+                                if (opposingGapIsSafe(sourceState, vehicle, passDistance, sourceLane.widthMeters))
+                                    sourceLane.widthMeters else 0.0
+                            }
+                            else -> 0.0
+                        }
+                        val maxLateralStep = sourceLane.widthMeters * step / 2.5
+                        vehicle.passingOffsetMeters += (desiredOffset - vehicle.passingOffsetMeters)
+                            .coerceIn(-maxLateralStep, maxLateralStep)
+                    }
+                }
+            }
+
             // Update vehicles front-to-back on each physical approach lane. On
             // the approach, a vehicle follows any leader sharing its current lane;
             // after crossing, it follows only vehicles on its own movement path.
@@ -549,6 +752,7 @@ object TrafficSimulationEngine {
                             val candidateVehicle = candidate.second
                             candidateVehicle !== vehicle &&
                                 candidateVehicle.positionMeters > vehicle.positionMeters &&
+                                !(vehicle.passingOffsetMeters > 0.5 && candidateVehicle.crashedUntilSeconds?.let { time < it } == true) &&
                                 (candidateVehicle.positionMeters <= 0.0 ||
                                     candidateState.connectionId == state.connectionId)
                         }.map { it.second }
@@ -621,6 +825,9 @@ object TrafficSimulationEngine {
                 }
             }
 
+            // Any overlap of the rendered vehicle envelopes is an actual collision, regardless of risk score.
+            detectPhysicalContactCollisions()
+
             // Remove vehicles only after their rear bumper has cleared the path.
             states.values.forEach { state ->
                 state.vehicles.removeAll { vehicle ->
@@ -667,7 +874,8 @@ object TrafficSimulationEngine {
                             widthMeters = vehicle.waiting.model.widthMeters,
                             laneChangeFromConnectionId = vehicle.laneChangeFromConnectionId,
                             laneChangeProgress = vehicle.laneChangeProgress,
-                            isCrashed = vehicle.crashedUntilSeconds?.let { time < it } == true
+                            isCrashed = vehicle.crashedUntilSeconds?.let { time < it } == true,
+                            passingOffsetMeters = vehicle.passingOffsetMeters
                         )
                     }
                 }.toMutableList()
