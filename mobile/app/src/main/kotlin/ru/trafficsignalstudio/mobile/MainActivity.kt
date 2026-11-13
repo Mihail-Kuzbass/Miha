@@ -60,9 +60,11 @@ private fun TrafficSignalStudioApp() {
                 project = project,
                 intersection = project.network.intersections.firstOrNull(),
                 onBack = { selectedProject = null },
+                onProjectChange = { selectedProject = it },
                 onSave = {
                     scope.launch {
-                        withContext(Dispatchers.IO) { store.save(project) }
+                        val current = selectedProject ?: return@launch
+                        withContext(Dispatchers.IO) { store.save(current) }
                         refreshProjects()
                         selectedProject = null
                     }
@@ -129,6 +131,6 @@ private fun HomeScreen(
                 }
             }
         }
-        Text("Версия 0.1.0 · Работа без обязательного подключения к интернету")
+        Text("Версия 0.2.0 · Работа без обязательного подключения к интернету")
     }
 }
