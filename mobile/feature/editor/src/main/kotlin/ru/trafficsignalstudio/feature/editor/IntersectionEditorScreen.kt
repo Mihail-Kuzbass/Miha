@@ -54,6 +54,8 @@ import ru.trafficsignalstudio.geometry.TrajectoryConflictAnalyzer
 import ru.trafficsignalstudio.geometry.TrajectoryConflictKind
 import ru.trafficsignalstudio.geometry.ConflictSignalStatus
 import ru.trafficsignalstudio.geometry.MovementTrajectory
+import ru.trafficsignalstudio.geometry.VehicleEnvelopeConflictAnalyzer
+import ru.trafficsignalstudio.geometry.SignalPlanTimingAnalyzer
 import ru.trafficsignalstudio.model.SignalPhase
 import ru.trafficsignalstudio.model.SignalPlan
 import ru.trafficsignalstudio.model.ProjectDocument
@@ -104,6 +106,12 @@ fun IntersectionEditorScreen(
     }
     val movementConflicts = remember(intersection?.id, intersection?.laneConnections, intersection?.approaches, intersection?.signalPlan) {
         intersection?.let(TrajectoryConflictAnalyzer::analyzeMovementConflicts).orEmpty()
+    }
+    val envelopeConflicts = remember(movementTrajectories) {
+        VehicleEnvelopeConflictAnalyzer.analyze(movementTrajectories)
+    }
+    val timingReport = remember(intersection?.id, intersection?.signalPlan, intersection?.laneConnections) {
+        intersection?.let(SignalPlanTimingAnalyzer::analyze)
     }
 
     fun updateIntersection(updated: Intersection) {
@@ -436,6 +444,31 @@ fun IntersectionEditorScreen(
                                 val plan = intersection.signalPlan ?: SignalPlan()
                                 updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.filterNot { it.id == phase.id })))
                             }) { Text("Удалить") }
+                        }
+                    }
+                    timingReport?.let { report ->
+                        Text("Расчётный цикл: ${report.cycleLengthSeconds} с",
+                            style = MaterialTheme.typography.titleSmall)
+                        report.phaseWindows.forEach { window ->
+                            Text("${window.phaseName}: зелёный ${window.startSeconds}–${window.greenEndSeconds} с; " +
+                                "жёлтый до ${window.yellowEndSeconds} с; общий красный до ${window.allRedEndSeconds} с",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        report.diagnostics.forEach { diagnostic ->
+                            Text("Проверка: ${diagnostic.message}",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Text("Конфликтов габаритов ТС: ${envelopeConflicts.size}",
+                        style = MaterialTheme.typography.bodySmall)
+                    if (envelopeConflicts.isNotEmpty()) {
+                        envelopeConflicts.take(5).forEach { conflict ->
+                            Text("${conflict.firstConnectionId} ↔ ${conflict.secondConnectionId}: " +
+                                "зазор между осевыми траекториями ${"%.2f".format(conflict.minimumCenterlineDistanceMeters)} м " +
+                                "(требуется ${"%.2f".format(conflict.requiredClearanceMeters)} м)",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     if (movementConflicts.isNotEmpty()) {
