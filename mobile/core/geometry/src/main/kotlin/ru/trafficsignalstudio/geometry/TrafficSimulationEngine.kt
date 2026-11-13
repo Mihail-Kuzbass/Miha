@@ -416,9 +416,11 @@ object TrafficSimulationEngine {
                 val difference = ((approach.headingDegrees - sourceHeading + 540.0) % 360.0) - 180.0
                 kotlin.math.abs(kotlin.math.abs(difference) - 180.0) <= 25.0
             }.map { it.id }.toSet()
+            val opposingStates = states.values.filter { it.fromApproachId in opposingApproaches }
+            if (opposingStates.isEmpty()) return false
             val requiredClearance = passDistanceMeters +
                 vehicle.speedMetersPerSecond * 2.0 + vehicle.waiting.model.lengthMeters + 5.0
-            return states.values.filter { it.fromApproachId in opposingApproaches }.all { opposingState ->
+            return opposingStates.all { opposingState ->
                 opposingState.vehicles.filter { it.crashedUntilSeconds == null }.all { oncoming ->
                     val oncomingPose = worldPose(opposingState, oncoming)
                     val dx = oncomingPose.first.xMeters - ownPose.first.xMeters
