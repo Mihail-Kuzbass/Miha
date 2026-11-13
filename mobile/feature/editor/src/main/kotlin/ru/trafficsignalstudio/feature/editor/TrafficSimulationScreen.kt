@@ -359,10 +359,20 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
     }
     Canvas(modifier = Modifier.fillMaxWidth().height(280.dp).background(Color(0xFF263238))) {
         val trajectoryById = trajectories.associateBy { it.connectionId }
+        val storageLength = snapshot?.approachStorageLengthMeters ?: 120.0
+        val approachExtensions = trajectories.mapNotNull { trajectory ->
+            val first = trajectory.points.getOrNull(0) ?: return@mapNotNull null
+            val second = trajectory.points.getOrNull(1) ?: return@mapNotNull null
+            val segmentLength = hypot(second.xMeters - first.xMeters, second.yMeters - first.yMeters).coerceAtLeast(1e-6)
+            ru.trafficsignalstudio.model.Point2D(
+                first.xMeters + (first.xMeters - second.xMeters) * storageLength / segmentLength,
+                first.yMeters + (first.yMeters - second.yMeters) * storageLength / segmentLength
+            )
+        }
         val vehiclePoints = snapshot?.activeVehicles.orEmpty().mapNotNull { vehicle ->
             trajectoryById[vehicle.connectionId]?.let { pointAtProgress(it.points, vehicle.progress) }
         }
-        val allPoints = trajectories.flatMap { it.points } + vehiclePoints
+        val allPoints = trajectories.flatMap { it.points } + approachExtensions + vehiclePoints
         if (allPoints.isEmpty()) return@Canvas
         val minX = allPoints.minOf { it.xMeters }; val maxX = allPoints.maxOf { it.xMeters }
         val minY = allPoints.minOf { it.yMeters }; val maxY = allPoints.maxOf { it.yMeters }
@@ -380,6 +390,16 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
                 if (index == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
             }
             drawPath(path, Color(0xFFB0BEC5).copy(alpha = 0.65f), style = Stroke(width = 5f))
+            val first = trajectory.points.firstOrNull()
+            val second = trajectory.points.getOrNull(1)
+            if (first != null && second != null) {
+                val segmentLength = hypot(second.xMeters - first.xMeters, second.yMeters - first.yMeters).coerceAtLeast(1e-6)
+                val extension = ru.trafficsignalstudio.model.Point2D(
+                    first.xMeters + (first.xMeters - second.xMeters) * storageLength / segmentLength,
+                    first.yMeters + (first.yMeters - second.yMeters) * storageLength / segmentLength
+                )
+                drawLine(Color(0xFF78909C).copy(alpha = 0.45f), map(extension), map(first), strokeWidth = 2.5f)
+            }
         }
         snapshot?.activeVehicles?.forEach { vehicle ->
             val trajectory = trajectoryById[vehicle.connectionId] ?: return@forEach
