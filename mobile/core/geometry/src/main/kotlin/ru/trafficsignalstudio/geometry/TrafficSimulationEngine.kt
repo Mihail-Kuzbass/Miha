@@ -211,6 +211,13 @@ object TrafficSimulationEngine {
         }
         val riskAssessment = CrashRiskAnalyzer.assess(intersection, demand)
         val movementConflicts = riskAssessment.conflicts
+        val conflictingConnectionsById = mutableMapOf<String, MutableSet<String>>()
+        movementConflicts.forEach { conflict ->
+            conflictingConnectionsById.getOrPut(conflict.firstConnectionId) { mutableSetOf() }
+                .add(conflict.secondConnectionId)
+            conflictingConnectionsById.getOrPut(conflict.secondConnectionId) { mutableSetOf() }
+                .add(conflict.firstConnectionId)
+        }
         movementConflicts.forEach { conflict ->
             when (conflict.signalStatus) {
                 ConflictSignalStatus.SIMULTANEOUS_GREEN -> diagnostics +=
@@ -450,8 +457,10 @@ object TrafficSimulationEngine {
                 .coerceAtLeast(0.5)
             val sampleSeconds = 0.25
             val horizonSeconds = 3.0
+            val conflictingIds = conflictingConnectionsById[state.connectionId].orEmpty()
+            if (conflictingIds.isEmpty()) return null
             val possibleConflicts = states.values.asSequence()
-                .filter { it.connectionId != state.connectionId }
+                .filter { it.connectionId in conflictingIds }
                 .flatMap { otherState ->
                     otherState.vehicles.asSequence()
                         .filter { other ->
