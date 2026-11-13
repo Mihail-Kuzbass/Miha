@@ -497,6 +497,25 @@ object TrafficSimulationEngine {
             val pair = listOf(zone.firstConnectionId, zone.secondConnectionId).sorted().joinToString("|")
             "$pair:${(zone.point.xMeters * 4.0).toInt()}:${(zone.point.yMeters * 4.0).toInt()}"
         }
+        data class IndexedConflictZone(
+            val zone: ConflictZone,
+            val otherConnectionId: String,
+            val ownStationMeters: Double,
+            val otherStationMeters: Double
+        )
+        val conflictZonesByConnection = mutableMapOf<String, MutableList<IndexedConflictZone>>()
+        val conflictZonesByPair = mutableMapOf<Pair<String, String>, MutableList<ConflictZone>>()
+        fun connectionPairKey(first: String, second: String): Pair<String, String> =
+            if (first <= second) first to second else second to first
+        conflictZones.forEach { zone ->
+            conflictZonesByConnection.getOrPut(zone.firstConnectionId) { mutableListOf() } +=
+                IndexedConflictZone(zone, zone.secondConnectionId, zone.firstStationMeters, zone.secondStationMeters)
+            conflictZonesByConnection.getOrPut(zone.secondConnectionId) { mutableListOf() } +=
+                IndexedConflictZone(zone, zone.firstConnectionId, zone.secondStationMeters, zone.firstStationMeters)
+            conflictZonesByPair.getOrPut(connectionPairKey(zone.firstConnectionId, zone.secondConnectionId)) {
+                mutableListOf()
+            } += zone
+        }
 
         fun timeToCoverDistance(distanceMeters: Double, vehicle: VehicleAgent): Double {
             if (distanceMeters <= 0.0) return 0.0
@@ -527,12 +546,10 @@ object TrafficSimulationEngine {
             if (vehicle.positionMeters < 0.0 &&
                 (!greenFor(state.connectionId, time) || isBlocked(state.connectionId, time))) return null
             var selected: ConflictControl? = null
-            for (zone in conflictZones) {
-                val ownIsFirst = zone.firstConnectionId == state.connectionId
-                if (!ownIsFirst && zone.secondConnectionId != state.connectionId) continue
-                val otherConnectionId = if (ownIsFirst) zone.secondConnectionId else zone.firstConnectionId
-                val ownStation = if (ownIsFirst) zone.firstStationMeters else zone.secondStationMeters
-                val otherStation = if (ownIsFirst) zone.secondStationMeters else zone.firstStationMeters
+            for (indexedZone in conflictZonesByConnection[state.connectionId].orEmpty()) {
+                val otherConnectionId = indexedZone.otherConnectionId
+                val ownStation = indexedZone.ownStationMeters
+                val otherStation = indexedZone.otherStationMeters
                 val otherState = states[otherConnectionId] ?: continue
                 for (other in otherState.vehicles) {
                     if (other === vehicle || other.crashedUntilSeconds?.let { time >= it } == true) continue
@@ -636,33 +653,39 @@ object TrafficSimulationEngine {
             secondLength: Double,
             secondWidth: Double
         ): Boolean {
-            fun corners(center: Point2D, direction: Point2D, length: Double, width: Double): List<Point2D> {
-                val halfLength = length / 2.0
-                val halfWidth = width / 2.0
-                val normalX = -direction.yMeters
-                val normalY = direction.xMeters
-                return listOf(
-                    Point2D(center.xMeters + direction.xMeters * halfLength + normalX * halfWidth,
-                        center.yMeters + direction.yMeters * halfLength + normalY * halfWidth),
-                    Point2D(center.xMeters + direction.xMeters * halfLength - normalX * halfWidth,
-                        center.yMeters + direction.yMeters * halfLength - normalY * halfWidth),
-                    Point2D(center.xMeters - direction.xMeters * halfLength + normalX * halfWidth,
-                        center.yMeters - direction.yMeters * halfLength + normalY * halfWidth),
-                    Point2D(center.xMeters - direction.xMeters * halfLength - normalX * halfWidth,
-                        center.yMeters - direction.yMeters * halfLength - normalY * halfWidth)
+            // Allocation-free oriented-rectangle SAT. This routine is called
+            // repeatedly by the predictive safety layer, so avoid constructing
+            // corner/projection lists for every sampled time instant.
+            val dx = secondCenter.xMeters - firstCenter.xMeters
+            val dy = secondCenter.yMeters - firstCenter.yMeters
+            val firstNormalX = -firstDirection.yMeters
+            val firstNormalY = firstDirection.xMeters
+            val secondNormalX = -secondDirection.yMeters
+            val secondNormalY = secondDirection.xMeters
+            val firstHalfLength = firstLength * 0.5
+            val firstHalfWidth = firstWidth * 0.5
+            val secondHalfLength = secondLength * 0.5
+            val secondHalfWidth = secondWidth * 0.5
+
+            fun separated(axisX: Double, axisY: Double): Boolean {
+                val centerDistance = kotlin.math.abs(dx * axisX + dy * axisY)
+                val firstRadius = firstHalfLength * kotlin.math.abs(
+                    firstDirection.xMeters * axisX + firstDirection.yMeters * axisY
+                ) + firstHalfWidth * kotlin.math.abs(
+                    firstNormalX * axisX + firstNormalY * axisY
                 )
+                val secondRadius = secondHalfLength * kotlin.math.abs(
+                    secondDirection.xMeters * axisX + secondDirection.yMeters * axisY
+                ) + secondHalfWidth * kotlin.math.abs(
+                    secondNormalX * axisX + secondNormalY * axisY
+                )
+                return centerDistance > firstRadius + secondRadius + 0.02
             }
-            val first = corners(firstCenter, firstDirection, firstLength, firstWidth)
-            val second = corners(secondCenter, secondDirection, secondLength, secondWidth)
-            val firstNormal = Point2D(-firstDirection.yMeters, firstDirection.xMeters)
-            val secondNormal = Point2D(-secondDirection.yMeters, secondDirection.xMeters)
-            val axes = listOf(firstDirection, firstNormal, secondDirection, secondNormal)
-            return axes.all { axis ->
-                val firstProjection = first.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
-                val secondProjection = second.map { it.xMeters * axis.xMeters + it.yMeters * axis.yMeters }
-                firstProjection.max() >= secondProjection.min() - 0.02 &&
-                    secondProjection.max() >= firstProjection.min() - 0.02
-            }
+
+            return !separated(firstDirection.xMeters, firstDirection.yMeters) &&
+                !separated(firstNormalX, firstNormalY) &&
+                !separated(secondDirection.xMeters, secondDirection.yMeters) &&
+                !separated(secondNormalX, secondNormalY)
         }
 
         /**
@@ -679,12 +702,9 @@ object TrafficSimulationEngine {
             if (conflictingIds.isEmpty()) return null
 
             fun otherHasPriority(otherState: MovementState, other: VehicleAgent): Boolean {
-                val pairZones = conflictZones.filter { zone ->
-                    (zone.firstConnectionId == state.connectionId &&
-                        zone.secondConnectionId == otherState.connectionId) ||
-                        (zone.secondConnectionId == state.connectionId &&
-                            zone.firstConnectionId == otherState.connectionId)
-                }
+                val pairZones = conflictZonesByPair[
+                    connectionPairKey(state.connectionId, otherState.connectionId)
+                ].orEmpty()
                 val zone = pairZones
                     .filter { candidate ->
                         val ownStation = if (candidate.firstConnectionId == state.connectionId)
@@ -1088,7 +1108,12 @@ object TrafficSimulationEngine {
                     val desiredSpeed = min(demand.approachSpeedKmh, model.maximumSpeedKmh) / 3.6
                     val followingAcceleration = idmAcceleration(vehicle, obstacleGap, obstacleSpeed, desiredSpeed)
                     val zoneControl = conflictZoneControl(state, vehicle)
-                    val predictiveAcceleration = predictiveCollisionBrake(state, vehicle)
+                    // The reservation layer already protects this vehicle when
+                    // it returns a stop command. Run the expensive independent
+                    // swept-envelope predictor only when no reservation brake
+                    // is active.
+                    val predictiveAcceleration = if (zoneControl == null)
+                        predictiveCollisionBrake(state, vehicle) else null
                     val safetyAcceleration = zoneControl?.accelerationMetersPerSecondSquared
                         ?: predictiveAcceleration
                     val acceleration = if (safetyAcceleration == null) followingAcceleration
