@@ -64,6 +64,9 @@ import ru.trafficsignalstudio.model.RoadSegment
 import ru.trafficsignalstudio.model.RoadSegmentKind
 import ru.trafficsignalstudio.model.RoadJunctionNode
 import ru.trafficsignalstudio.model.SafetyIsland
+import ru.trafficsignalstudio.model.VehicleModel
+import ru.trafficsignalstudio.model.VehicleModelCatalog
+import ru.trafficsignalstudio.model.VehicleClass
 import kotlin.math.max
 import kotlin.math.min
 
@@ -94,15 +97,19 @@ fun IntersectionEditorScreen(
     var targetLaneKey by remember(intersection?.id) { mutableStateOf<String?>(null) }
     var sourceLaneMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
     var targetLaneMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
+    var vehicleMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
+    var selectedVehicleModelId by remember(intersection?.id) { mutableStateOf(VehicleModelCatalog.defaultPassengerCar.id) }
     val pendingPoints = remember(intersection?.id) { mutableStateListOf<Point2D>() }
     val safeIndex = selectedApproachIndex.coerceIn(0, max(0, (intersection?.approaches?.size ?: 1) - 1))
     val selectedApproach = intersection?.approaches?.getOrNull(safeIndex)
+    val selectedVehicleModel = VehicleModelCatalog.defaults.firstOrNull { it.id == selectedVehicleModelId }
+        ?: VehicleModelCatalog.defaultPassengerCar
     val validationErrors = intersection?.let(IntersectionGeometryEditor::validate).orEmpty()
     val trajectoryConflicts = remember(intersection?.id, intersection?.roadSegments) {
         intersection?.let(TrajectoryConflictAnalyzer::analyze).orEmpty()
     }
-    val movementTrajectories = remember(intersection?.id, intersection?.laneConnections, intersection?.approaches) {
-        intersection?.let(TrajectoryConflictAnalyzer::buildMovementTrajectories).orEmpty()
+    val movementTrajectories = remember(intersection?.id, intersection?.laneConnections, intersection?.approaches, selectedVehicleModel) {
+        intersection?.let { TrajectoryConflictAnalyzer.buildMovementTrajectories(it, selectedVehicleModel) }.orEmpty()
     }
     val movementConflicts = remember(intersection?.id, intersection?.laneConnections, intersection?.approaches, intersection?.signalPlan) {
         intersection?.let(TrajectoryConflictAnalyzer::analyzeMovementConflicts).orEmpty()
@@ -157,6 +164,7 @@ fun IntersectionEditorScreen(
                         intersection = intersection,
                         movementTrajectories = movementTrajectories,
                         movementConflicts = movementConflicts,
+                        vehicleModel = selectedVehicleModel,
                         pendingPoints = pendingPoints,
                         drawingTool = drawingTool,
                         onAddPoint = { point -> pendingPoints.add(snapToNetwork(point, intersection)) },
@@ -180,6 +188,40 @@ fun IntersectionEditorScreen(
                     )
                 } else {
                     Text("Нет геометрии перекрёстка", modifier = Modifier.align(Alignment.Center))
+                }
+            }
+        }
+
+        if (intersection != null) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Расчётная модель транспортного средства", style = MaterialTheme.typography.titleMedium)
+                    Box {
+                        OutlinedButton(onClick = { vehicleMenuExpanded = true }) {
+                            Text(selectedVehicleModel.name)
+                        }
+                        DropdownMenu(expanded = vehicleMenuExpanded, onDismissRequest = { vehicleMenuExpanded = false }) {
+                            VehicleModelCatalog.defaults.forEach { model ->
+                                DropdownMenuItem(
+                                    text = { Text(model.name) },
+                                    onClick = { selectedVehicleModelId = model.id; vehicleMenuExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                    Text("Габариты: ${"%.2f".format(selectedVehicleModel.lengthMeters)} × " +
+                        "${"%.2f".format(selectedVehicleModel.widthMeters)} × " +
+                        "${"%.2f".format(selectedVehicleModel.heightMeters)} м",
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text("Колёсная база: ${"%.2f".format(selectedVehicleModel.wheelbaseMeters)} м · " +
+                        "минимальный радиус поворота: ${"%.2f".format(selectedVehicleModel.minimumTurningRadiusMeters)} м",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("Максимальная скорость: ${selectedVehicleModel.maximumSpeedKmh.toInt()} км/ч · " +
+                        "разгон: ${"%.2f".format(selectedVehicleModel.accelerationMetersPerSecondSquared)} м/с² · " +
+                        "служебное замедление: ${"%.2f".format(selectedVehicleModel.serviceDecelerationMetersPerSecondSquared)} м/с²",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("На схеме модель показана в масштабе на траекториях. Значения каталога — базовые инженерные параметры; уточняйте их по конкретной модели транспорта.",
+                        style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -786,6 +828,7 @@ private fun IntersectionGeometryPreview(
     intersection: Intersection,
     movementTrajectories: List<MovementTrajectory>,
     movementConflicts: List<ru.trafficsignalstudio.geometry.MovementTrajectoryConflict>,
+    vehicleModel: VehicleModel,
     pendingPoints: List<Point2D>,
     drawingTool: DrawingTool, onAddPoint: (Point2D) -> Unit,
     zoom: Float, pan: Offset, editMode: Boolean, selectedSegmentId: String?,
@@ -1047,6 +1090,19 @@ private fun IntersectionGeometryPreview(
             val routeColor = if (hasSimultaneousConflict) Color(0xFFFF5252) else Color(0xFF80D8FF)
             drawPath(path, routeColor, style = Stroke(width = 3.5f, cap = StrokeCap.Round))
             if (trajectory.points.size >= 2) {
+                val markerIndex = (trajectory.points.lastIndex * 0.62f).toInt().coerceIn(1, trajectory.points.lastIndex)
+                val markerBefore = trajectory.points[markerIndex - 1]
+                val markerAfter = trajectory.points[markerIndex]
+                val markerPoint = trajectory.points[markerIndex]
+                val markerHeading = Math.toDegrees(kotlin.math.atan2(
+                    -(markerAfter.yMeters - markerBefore.yMeters),
+                    markerAfter.xMeters - markerBefore.xMeters
+                )).toFloat()
+                val markerCenter = Offset(
+                    center.x + markerPoint.xMeters.toFloat() * scale * 0.35f,
+                    center.y - markerPoint.yMeters.toFloat() * scale * 0.35f
+                )
+                drawVehicleGlyph(markerCenter, markerHeading, scale * 0.35f, vehicleModel)
                 val before = trajectory.points[trajectory.points.lastIndex - 1]
                 val tip = trajectory.points.last()
                 val dx = (tip.xMeters - before.xMeters).toFloat()
@@ -1107,6 +1163,58 @@ private fun IntersectionGeometryPreview(
     }
 }
 
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawVehicleGlyph(
+    center: Offset,
+    headingDegrees: Float,
+    pixelsPerMeter: Float,
+    model: VehicleModel
+) {
+    val length = (model.lengthMeters.toFloat() * pixelsPerMeter).coerceIn(12f, 64f)
+    val width = (model.widthMeters.toFloat() * pixelsPerMeter).coerceIn(6f, 22f)
+    val bodyColor = when (model.vehicleClass) {
+        VehicleClass.PASSENGER_CAR -> Color(0xFF1565C0)
+        VehicleClass.LIGHT_COMMERCIAL -> Color(0xFF00897B)
+        VehicleClass.RIGID_TRUCK, VehicleClass.ARTICULATED_TRUCK -> Color(0xFF8D6E63)
+        VehicleClass.CITY_BUS, VehicleClass.ARTICULATED_BUS -> Color(0xFFF9A825)
+        VehicleClass.TROLLEYBUS, VehicleClass.ARTICULATED_TROLLEYBUS -> Color(0xFF2E7D32)
+        VehicleClass.MOTORCYCLE -> Color(0xFF6A1B9A)
+        VehicleClass.BICYCLE -> Color(0xFF455A64)
+    }
+    rotate(headingDegrees, center) {
+        val left = center.x - width / 2f
+        val top = center.y - length / 2f
+        drawRoundRect(
+            color = bodyColor,
+            topLeft = Offset(left, top),
+            size = Size(width, length),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.22f),
+        )
+        drawRoundRect(
+            color = Color.White,
+            topLeft = Offset(left + width * 0.16f, top + length * 0.12f),
+            size = Size(width * 0.68f, length * 0.17f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.12f)
+        )
+        drawRoundRect(
+            color = Color(0xFF263238),
+            topLeft = Offset(left + width * 0.12f, top + length * 0.04f),
+            size = Size(width * 0.76f, length * 0.08f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.08f)
+        )
+        if (model.articulationPointFromFrontMeters != null) {
+            val jointY = top + length * (model.articulationPointFromFrontMeters.toFloat() / model.lengthMeters.toFloat())
+            drawLine(Color(0xFFFFEB3B), Offset(left, jointY), Offset(left + width, jointY), 1.5f)
+        }
+        drawRoundRect(
+            color = Color.White.copy(alpha = 0.9f),
+            topLeft = Offset(left, top),
+            size = Size(width, length),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width * 0.22f),
+            style = Stroke(width = 1.2f)
+        )
+    }
+}
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMovementArrow(
     x: Float,
