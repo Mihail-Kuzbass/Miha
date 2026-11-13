@@ -124,7 +124,7 @@ object IntersectionGeometryEditor {
         if (segment.lanes.isNotEmpty()) return segment.lanes.sortedBy { it.index }
         val count = segment.laneCount.coerceIn(1, 16)
         val laneWidth = segment.widthMeters / count
-        return (0 until count).map { index -> RoadSegmentLane(index = index + 1, widthMeters = laneWidth) }
+        return (0 until count).map { index -> RoadSegmentLane(id = "${segment.id}-lane-${index + 1}", index = index + 1, widthMeters = laneWidth) }
     }
 
     fun setRoadLaneCount(intersection: Intersection, segmentId: String, count: Int): Intersection {
@@ -155,6 +155,20 @@ object IntersectionGeometryEditor {
                     if (lane.id == laneId) lane.copy(widthMeters = (lane.widthMeters + deltaMeters).coerceIn(2.5, 5.0)) else lane
                 }
                 segment.copy(lanes = lanes, laneCount = lanes.size, widthMeters = lanes.sumOf { it.widthMeters })
+            }
+        })
+    }
+
+    fun changeRoadSegmentWidth(intersection: Intersection, segmentId: String, deltaMeters: Double): Intersection {
+        require(deltaMeters.isFinite())
+        return intersection.copy(roadSegments = intersection.roadSegments.map { segment ->
+            if (segment.id != segmentId) segment else {
+                val lanes = effectiveRoadLanes(segment)
+                val perLaneDelta = deltaMeters / lanes.size
+                val changed = lanes.map { lane ->
+                    lane.copy(widthMeters = (lane.widthMeters + perLaneDelta).coerceIn(2.5, 5.0))
+                }
+                segment.copy(lanes = changed, laneCount = changed.size, widthMeters = changed.sumOf { it.widthMeters })
             }
         })
     }
