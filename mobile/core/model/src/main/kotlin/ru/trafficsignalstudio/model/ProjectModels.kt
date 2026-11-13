@@ -3,7 +3,8 @@ package ru.trafficsignalstudio.model
 import java.util.UUID
 
 enum class IntersectionType {
-    FOUR_LEG, T_JUNCTION, Y_JUNCTION, ROUNDABOUT, CUSTOM
+    FOUR_LEG, T_JUNCTION, Y_JUNCTION, FIVE_LEG, SIX_LEG,
+    ROUNDABOUT, DIAMOND_INTERCHANGE, CLOVERLEAF_INTERCHANGE, CUSTOM
 }
 
 enum class MovementKind {
@@ -29,12 +30,28 @@ data class Approach(
     val lanes: List<Lane>
 )
 
+/**
+ * Independent road centerline. Points are local coordinates in metres,
+ * relative to the intersection centre. A non-zero level represents a
+ * grade-separated roadway and is not an at-grade conflict by itself.
+ */
+data class RoadSegment(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val centerline: List<Point2D>,
+    val widthMeters: Double = 7.0,
+    val laneCount: Int = 2,
+    val elevationLevel: Int = 0,
+    val isRamp: Boolean = false
+)
+
 data class Intersection(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val type: IntersectionType,
     val center: Point2D = Point2D(0.0, 0.0),
-    val approaches: List<Approach>
+    val approaches: List<Approach>,
+    val roadSegments: List<RoadSegment> = emptyList()
 )
 
 data class RoadNetwork(
@@ -50,7 +67,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
