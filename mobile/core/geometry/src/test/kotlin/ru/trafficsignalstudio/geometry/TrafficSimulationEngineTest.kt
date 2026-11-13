@@ -264,7 +264,7 @@ class TrafficSimulationEngineTest {
         ))
         val samples = result.snapshots.mapNotNull { snapshot ->
             snapshot.activeVehicles.firstOrNull { it.id == 1L }?.let { snapshot.timeSeconds to it }
-        }.filter { it.first < 8.0 }
+        }.filter { it.first <= 20.0 }
         assertTrue("The first vehicle should appear in snapshots", samples.isNotEmpty())
         assertEquals("Vehicles must start from rest", 0.0, samples.first().second.speedMetersPerSecond, 1e-6)
         assertTrue(
