@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -349,7 +350,7 @@ private fun IntersectionGeometryPreview(
         .background(Color(0xFFE8EEE8), RoundedCornerShape(12.dp))
         .pointerInput(intersection.id, drawingTool, editMode, selectedSegmentId, zoom, pan) {
             detectTapGestures { offset ->
-                val factor = (size.minDimension * 0.28f / 14.0f * zoom * 0.35f).coerceAtLeast(0.0001f)
+                val factor = (minOf(size.width, size.height) * 0.28f / 14.0f * zoom * 0.35f).coerceAtLeast(0.0001f)
                 if (editMode) {
                     val center = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
                     val nearest = intersection.roadSegments.mapNotNull { segment ->
@@ -372,7 +373,7 @@ private fun IntersectionGeometryPreview(
                 var draggedIndex = -1
                 detectDragGestures(onDragStart = { start ->
                     val segment = intersection.roadSegments.firstOrNull { it.id == selectedSegmentId }
-                    val factor = size.minDimension * 0.28f / 14.0f * zoom * 0.35f
+                    val factor = minOf(size.width, size.height) * 0.28f / 14.0f * zoom * 0.35f
                     val center = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
                     draggedIndex = segment?.centerline?.indices?.minByOrNull { index ->
                         val p = segment.centerline[index]
@@ -381,7 +382,7 @@ private fun IntersectionGeometryPreview(
                 }, onDrag = { change, _ ->
                     val segment = intersection.roadSegments.firstOrNull { it.id == selectedSegmentId }
                     if (segment != null && draggedIndex in segment.centerline.indices) {
-                        val factor = (size.minDimension * 0.28f / 14.0f * zoom * 0.35f).coerceAtLeast(0.0001f)
+                        val factor = (minOf(size.width, size.height) * 0.28f / 14.0f * zoom * 0.35f).coerceAtLeast(0.0001f)
                         val old = segment.centerline[draggedIndex]
                         onMovePoint(segment.id, draggedIndex, Point2D(old.xMeters + change.positionChange().x / factor,
                             old.yMeters - change.positionChange().y / factor))
@@ -405,7 +406,7 @@ private fun IntersectionGeometryPreview(
         val center = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
         // Fixed scale keeps lane-count changes visible and gives custom layouts
         // a stable drawing coordinate system.
-        val scale = size.minDimension * 0.28f / 14.0f * zoom
+        val scale = minOf(size.width, size.height) * 0.28f / 14.0f * zoom
         val roadWidths = intersection.approaches.associate { approach ->
             approach.id to (approach.lanes.sumOf { it.widthMeters }.toFloat() * scale).coerceAtLeast(24f)
         }
