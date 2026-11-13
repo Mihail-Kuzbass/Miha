@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -46,6 +48,7 @@ import ru.trafficsignalstudio.geometry.IntersectionGeometryEditor
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.LaneFlowDirection
+import ru.trafficsignalstudio.model.LaneConnection
 import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.RoadSegment
@@ -78,6 +81,10 @@ fun IntersectionEditorScreen(
     var viewportPan by remember(intersection?.id) { mutableStateOf(Offset.Zero) }
     var selectedRoadSegmentId by remember(intersection?.id) { mutableStateOf<String?>(null) }
     var islandDrawingMode by remember(intersection?.id) { mutableStateOf(false) }
+    var sourceLaneKey by remember(intersection?.id) { mutableStateOf<String?>(null) }
+    var targetLaneKey by remember(intersection?.id) { mutableStateOf<String?>(null) }
+    var sourceLaneMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
+    var targetLaneMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
     val pendingPoints = remember(intersection?.id) { mutableStateListOf<Point2D>() }
     val safeIndex = selectedApproachIndex.coerceIn(0, max(0, (intersection?.approaches?.size ?: 1) - 1))
     val selectedApproach = intersection?.approaches?.getOrNull(safeIndex)
@@ -424,6 +431,98 @@ fun IntersectionEditorScreen(
             }
         }
 
+        if (intersection != null) {
+            val incomingLaneOptions = intersection.approaches.flatMap { approach ->
+                approach.lanes.filter { it.flowDirection == LaneFlowDirection.INTO_INTERSECTION }
+                    .map { lane -> Triple(approach, lane, "${approach.id}:${lane.id}") }
+            }
+            val outgoingLaneOptions = intersection.approaches.flatMap { approach ->
+                approach.lanes.filter { it.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION }
+                    .map { lane -> Triple(approach, lane, "${approach.id}:${lane.id}") }
+            }
+            val sourceOption = incomingLaneOptions.firstOrNull { it.third == sourceLaneKey } ?: incomingLaneOptions.firstOrNull()
+            val targetOption = outgoingLaneOptions.firstOrNull { it.third == targetLaneKey } ?: outgoingLaneOptions.firstOrNull()
+            val duplicateConnection = sourceOption != null && targetOption != null && intersection.laneConnections.any {
+                it.fromApproachId == sourceOption.first.id && it.fromLaneId == sourceOption.second.id &&
+                    it.toApproachId == targetOption.first.id && it.toLaneId == targetOption.second.id
+            }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Связи между полосами", style = MaterialTheme.typography.titleMedium)
+                    Text("Выберите въездную полосу, затем выездную. На схеме появится траектория движения.")
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { sourceLaneMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(sourceOption?.let { "${it.first.name} · №${it.second.index}" } ?: "Въездная полоса")
+                            }
+                            DropdownMenu(expanded = sourceLaneMenuExpanded, onDismissRequest = { sourceLaneMenuExpanded = false }) {
+                                incomingLaneOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text("${option.first.name} · полоса ${option.second.index}") },
+                                        onClick = { sourceLaneKey = option.third; sourceLaneMenuExpanded = false }
+                                    )
+                                }
+                            }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { targetLaneMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(targetOption?.let { "${it.first.name} · №${it.second.index}" } ?: "Выездная полоса")
+                            }
+                            DropdownMenu(expanded = targetLaneMenuExpanded, onDismissRequest = { targetLaneMenuExpanded = false }) {
+                                outgoingLaneOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text("${option.first.name} · полоса ${option.second.index}") },
+                                        onClick = { targetLaneKey = option.third; targetLaneMenuExpanded = false }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            if (sourceOption != null && targetOption != null) {
+                                val updated = runCatching {
+                                    IntersectionGeometryEditor.addLaneConnection(intersection, LaneConnection(
+                                        fromApproachId = sourceOption.first.id,
+                                        fromLaneId = sourceOption.second.id,
+                                        toApproachId = targetOption.first.id,
+                                        toLaneId = targetOption.second.id
+                                    ))
+                                }.getOrNull()
+                                if (updated != null) updateIntersection(updated)
+                            }
+                        },
+                        enabled = sourceOption != null && targetOption != null && !duplicateConnection
+                    ) { Text("Добавить траекторию") }
+                    if (incomingLaneOptions.isEmpty()) Text("Сначала назначьте хотя бы одну полосу как въездную.")
+                    if (outgoingLaneOptions.isEmpty()) Text("Сначала назначьте хотя бы одну полосу как выездную.")
+                    if (intersection.laneConnections.isNotEmpty()) {
+                        Text("Созданные траектории", style = MaterialTheme.typography.labelLarge)
+                        intersection.laneConnections.forEach { connection ->
+                            val fromApproach = intersection.approaches.firstOrNull { it.id == connection.fromApproachId }
+                            val fromLane = fromApproach?.lanes?.firstOrNull { it.id == connection.fromLaneId }
+                            val toApproach = intersection.approaches.firstOrNull { it.id == connection.toApproachId }
+                            val toLane = toApproach?.lanes?.firstOrNull { it.id == connection.toLaneId }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${fromApproach?.name ?: "?"} №${fromLane?.index ?: "?"} → ${toApproach?.name ?: "?"} №${toLane?.index ?: "?"}",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                OutlinedButton(onClick = {
+                                    updateIntersection(IntersectionGeometryEditor.removeLaneConnection(intersection, connection.id))
+                                }) { Text("Удалить") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (validationErrors.isNotEmpty()) {
             Text("Проверка геометрии: ${validationErrors.first()}", color = MaterialTheme.colorScheme.error)
         } else if (intersection != null) {
@@ -608,6 +707,48 @@ private fun IntersectionGeometryPreview(
                 drawLine(Color.White,
                     Offset(center.x - half, center.y - junctionHalf - 16f),
                     Offset(center.x + half, center.y - junctionHalf - 16f), 4f)
+            }
+        }
+
+        intersection.laneConnections.forEach { connection ->
+            val sourceApproach = intersection.approaches.firstOrNull { it.id == connection.fromApproachId }
+            val sourceLane = sourceApproach?.lanes?.firstOrNull { it.id == connection.fromLaneId }
+            val targetApproach = intersection.approaches.firstOrNull { it.id == connection.toApproachId }
+            val targetLane = targetApproach?.lanes?.firstOrNull { it.id == connection.toLaneId }
+            if (sourceApproach != null && sourceLane != null && targetApproach != null && targetLane != null) {
+                fun laneEndpoint(approach: ru.trafficsignalstudio.model.Approach, lane: ru.trafficsignalstudio.model.Lane): Offset {
+                    val ordered = approach.lanes.sortedBy { it.index }
+                    var laneOffset = -ordered.sumOf { it.widthMeters }.toFloat() * scale / 2f
+                    ordered.takeWhile { it.id != lane.id }.forEach { laneOffset += it.widthMeters.toFloat() * scale }
+                    laneOffset += lane.widthMeters.toFloat() * scale / 2f
+                    val localY = -junctionHalf - 22f
+                    val angle = Math.toRadians(approach.headingDegrees)
+                    val x = laneOffset.toDouble()
+                    val y = localY.toDouble()
+                    return Offset(
+                        center.x + (x * kotlin.math.cos(angle) - y * kotlin.math.sin(angle)).toFloat(),
+                        center.y + (x * kotlin.math.sin(angle) + y * kotlin.math.cos(angle)).toFloat()
+                    )
+                }
+                val start = laneEndpoint(sourceApproach, sourceLane)
+                val end = laneEndpoint(targetApproach, targetLane)
+                val path = Path().apply {
+                    moveTo(start.x, start.y)
+                    quadraticTo(center.x, center.y, end.x, end.y)
+                }
+                val routeColor = Color(0xFF80D8FF)
+                drawPath(path, routeColor, style = Stroke(width = 3.5f, cap = StrokeCap.Round))
+                val dx = end.x - center.x
+                val dy = end.y - center.y
+                val length = kotlin.math.hypot(dx, dy).coerceAtLeast(1f)
+                val ux = dx / length
+                val uy = dy / length
+                val baseX = end.x - ux * 11f
+                val baseY = end.y - uy * 11f
+                val wingX = -uy * 5f
+                val wingY = ux * 5f
+                drawLine(routeColor, end, Offset(baseX + wingX, baseY + wingY), 3f, cap = StrokeCap.Round)
+                drawLine(routeColor, end, Offset(baseX - wingX, baseY - wingY), 3f, cap = StrokeCap.Round)
             }
         }
 
