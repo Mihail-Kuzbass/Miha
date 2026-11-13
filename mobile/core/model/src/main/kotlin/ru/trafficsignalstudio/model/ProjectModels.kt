@@ -11,6 +11,12 @@ enum class MovementKind {
     THROUGH, LEFT, RIGHT, U_TURN, TRANSIT_ONLY
 }
 
+/** Direction of traffic on a lane relative to the intersection node. */
+enum class LaneFlowDirection {
+    INTO_INTERSECTION,
+    OUT_OF_INTERSECTION
+}
+
 data class Point2D(
     val xMeters: Double,
     val yMeters: Double
@@ -20,7 +26,8 @@ data class Lane(
     val id: String = UUID.randomUUID().toString(),
     val index: Int,
     val widthMeters: Double = 3.5,
-    val allowedMovements: Set<MovementKind> = setOf(MovementKind.THROUGH)
+    val allowedMovements: Set<MovementKind> = setOf(MovementKind.THROUGH),
+    val flowDirection: LaneFlowDirection = LaneFlowDirection.INTO_INTERSECTION
 )
 
 data class Approach(
@@ -88,7 +95,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val CURRENT_SCHEMA_VERSION = 3
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
