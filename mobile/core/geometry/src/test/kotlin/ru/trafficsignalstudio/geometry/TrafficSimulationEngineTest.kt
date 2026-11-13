@@ -196,4 +196,62 @@ class TrafficSimulationEngineTest {
             observedSpeeds.any { it in 0.1..10.0 }
         )
     }
+    
+    @Test fun conflictZonePriorityDoesNotDependOnVehicleCreationOrder() {
+        fun lane(id: String, flow: LaneFlowDirection) = Lane(
+            id = id,
+            index = 0,
+            flowDirection = flow,
+            allowedMovements = if (flow == LaneFlowDirection.INTO_INTERSECTION)
+                setOf(MovementKind.THROUGH) else emptySet()
+        )
+        val approaches = listOf(
+            Approach(id = "north", name = "Север", headingDegrees = 0.0,
+                lanes = listOf(lane("north-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("north-out", LaneFlowDirection.OUT_OF_INTERSECTION))),
+            Approach(id = "south", name = "Юг", headingDegrees = 180.0,
+                lanes = listOf(lane("south-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("south-out", LaneFlowDirection.OUT_OF_INTERSECTION))),
+            Approach(id = "east", name = "Восток", headingDegrees = 90.0,
+                lanes = listOf(lane("east-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("east-out", LaneFlowDirection.OUT_OF_INTERSECTION))),
+            Approach(id = "west", name = "Запад", headingDegrees = 270.0,
+                lanes = listOf(lane("west-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("west-out", LaneFlowDirection.OUT_OF_INTERSECTION)))
+        )
+        val connections = listOf(
+            LaneConnection("west-east", "west", "west-in", "east", "east-out"),
+            LaneConnection("east-west", "east", "east-in", "west", "west-out"),
+            LaneConnection("south-north", "south", "south-in", "north", "north-out"),
+            LaneConnection("north-south", "north", "north-in", "south", "south-out")
+        )
+        val intersection = Intersection(
+            name = "Перекрёсток с обратным порядком потоков",
+            type = IntersectionType.CUSTOM,
+            approaches = approaches,
+            laneConnections = connections,
+            signalPlan = SignalPlan(phases = listOf(
+                SignalPhase(
+                    id = "all-green",
+                    name = "Одновременный зелёный для проверки приоритета",
+                    greenConnectionIds = connections.map { it.id }.toSet(),
+                    greenSeconds = 55,
+                    yellowSeconds = 3,
+                    allRedSeconds = 2
+                )
+            ))
+        )
+        val result = TrafficSimulationEngine.run(intersection, TrafficSimulationDemand(
+            movements = connections.map { MovementTrafficDemand(it.id, 60.0) },
+            durationSeconds = 180,
+            approachStorageLengthMeters = 40.0,
+            approachSpeedKmh = 50.0
+        ))
+        assertFalse(
+            "Conflict-zone reservations must use arrival time, not creation order",
+            result.crashIncidents.any { it.cause == CrashIncidentCause.PHYSICAL_CONTACT }
+        )
+        assertTrue("Priority rotation must not deadlock all movements", result.totalDepartures > 0)
+    }
+
 }
