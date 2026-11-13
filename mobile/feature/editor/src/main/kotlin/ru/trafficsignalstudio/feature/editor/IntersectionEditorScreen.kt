@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import ru.trafficsignalstudio.geometry.IntersectionGeometryEditor
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.MovementKind
+import ru.trafficsignalstudio.model.LaneFlowDirection
 import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.RoadSegment
@@ -354,41 +355,67 @@ fun IntersectionEditorScreen(
                                     ) { Text("+") }
                                 }
                             }
-                            Text("Разрешённые направления", style = MaterialTheme.typography.labelMedium)
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                MovementKind.values().forEach { movement ->
-                                    val selected = movement in lane.allowedMovements
-                                    val label = when (movement) {
-                                        MovementKind.THROUGH -> "↑ Прямо"
-                                        MovementKind.LEFT -> "↰ Налево"
-                                        MovementKind.RIGHT -> "↱ Направо"
-                                        MovementKind.U_TURN -> "↶ Разворот"
-                                        MovementKind.TRANSIT_ONLY -> "Только ОТ"
-                                    }
-                                    if (selected) {
-                                        Button(
-                                            onClick = {
-                                                if (lane.allowedMovements.size > 1) {
-                                                    updateIntersection(IntersectionGeometryEditor.setLaneMovements(
-                                                        intersection, selectedApproach.id, lane.id,
-                                                        lane.allowedMovements - movement
-                                                    ))
-                                                }
-                                            },
-                                            enabled = lane.allowedMovements.size > 1
-                                        ) { Text(label) }
-                                    } else {
-                                        OutlinedButton(onClick = {
-                                            updateIntersection(IntersectionGeometryEditor.setLaneMovements(
-                                                intersection, selectedApproach.id, lane.id,
-                                                lane.allowedMovements + movement
-                                            ))
-                                        }) { Text(label) }
+                            Text("Направление движения по полосе", style = MaterialTheme.typography.labelMedium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                val inbound = lane.flowDirection == LaneFlowDirection.INTO_INTERSECTION
+                                if (inbound) {
+                                    Button(onClick = {}) { Text("↓ К перекрёстку") }
+                                } else {
+                                    OutlinedButton(onClick = {
+                                        updateIntersection(IntersectionGeometryEditor.setLaneFlowDirection(
+                                            intersection, selectedApproach.id, lane.id, LaneFlowDirection.INTO_INTERSECTION
+                                        ))
+                                    }) { Text("↓ К перекрёстку") }
+                                }
+                                if (!inbound) {
+                                    Button(onClick = {}) { Text("↑ От перекрёстка") }
+                                } else {
+                                    OutlinedButton(onClick = {
+                                        updateIntersection(IntersectionGeometryEditor.setLaneFlowDirection(
+                                            intersection, selectedApproach.id, lane.id, LaneFlowDirection.OUT_OF_INTERSECTION
+                                        ))
+                                    }) { Text("↑ От перекрёстка") }
+                                }
+                            }
+                            if (lane.flowDirection == LaneFlowDirection.INTO_INTERSECTION) {
+                                Text("Разрешённые манёвры на въезде", style = MaterialTheme.typography.labelMedium)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    MovementKind.values().forEach { movement ->
+                                        val selected = movement in lane.allowedMovements
+                                        val label = when (movement) {
+                                            MovementKind.THROUGH -> "↑ Прямо"
+                                            MovementKind.LEFT -> "↰ Налево"
+                                            MovementKind.RIGHT -> "↱ Направо"
+                                            MovementKind.U_TURN -> "↶ Разворот"
+                                            MovementKind.TRANSIT_ONLY -> "Только ОТ"
+                                        }
+                                        if (selected) {
+                                            Button(
+                                                onClick = {
+                                                    if (lane.allowedMovements.size > 1) {
+                                                        updateIntersection(IntersectionGeometryEditor.setLaneMovements(
+                                                            intersection, selectedApproach.id, lane.id,
+                                                            lane.allowedMovements - movement
+                                                        ))
+                                                    }
+                                                },
+                                                enabled = lane.allowedMovements.size > 1
+                                            ) { Text(label) }
+                                        } else {
+                                            OutlinedButton(onClick = {
+                                                updateIntersection(IntersectionGeometryEditor.setLaneMovements(
+                                                    intersection, selectedApproach.id, lane.id,
+                                                    lane.allowedMovements + movement
+                                                ))
+                                            }) { Text(label) }
+                                        }
                                     }
                                 }
+                            } else {
+                                Text("Выездная полоса: поток направлен от перекрёстка. Манёвры въезда для неё не задаются.")
                             }
                         }
                     }
@@ -560,6 +587,23 @@ private fun IntersectionGeometryPreview(
                     val x = center.x + offset
                     drawLine(Color.White, Offset(x, 0f),
                         Offset(x, center.y - junctionHalf), 2f, pathEffect = dash)
+                }
+                var laneOffset = -half
+                approach.lanes.sortedBy { it.index }.forEach { lane ->
+                    val laneCenterX = center.x + laneOffset + lane.widthMeters.toFloat() * scale / 2f
+                    val arrowY = center.y * 0.58f
+                    val towardCenter = lane.flowDirection == LaneFlowDirection.INTO_INTERSECTION
+                    val tipY = if (towardCenter) arrowY + 13f else arrowY - 13f
+                    val tailY = if (towardCenter) arrowY - 13f else arrowY + 13f
+                    val headBaseY = if (towardCenter) tipY - 8f else tipY + 8f
+                    val lanePixelWidth = lane.widthMeters.toFloat() * scale
+                    if (lanePixelWidth >= 13f) {
+                        drawLine(Color.White, Offset(laneCenterX, tailY), Offset(laneCenterX, tipY), 3f, cap = StrokeCap.Round)
+                        val wing = min(6f, lanePixelWidth * 0.22f)
+                        drawLine(Color.White, Offset(laneCenterX, tipY), Offset(laneCenterX - wing, headBaseY), 3f, cap = StrokeCap.Round)
+                        drawLine(Color.White, Offset(laneCenterX, tipY), Offset(laneCenterX + wing, headBaseY), 3f, cap = StrokeCap.Round)
+                    }
+                    laneOffset += lane.widthMeters.toFloat() * scale
                 }
                 drawLine(Color.White,
                     Offset(center.x - half, center.y - junctionHalf - 16f),
