@@ -43,6 +43,7 @@ import ru.trafficsignalstudio.geometry.TrajectoryConflictAnalyzer
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.VehicleClass
 import ru.trafficsignalstudio.model.VehicleModelCatalog
+import java.util.Locale
 import kotlin.math.hypot
 import kotlin.math.max
 
@@ -50,6 +51,47 @@ private data class MovementDemandForm(
     val total: String,
     val categories: Map<VehicleClass, String>
 )
+
+private fun parseIntensity(value: String): Double? =
+    value.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
+
+private fun formatIntensity(value: Double): String {
+    val rounded = kotlin.math.round(value * 100.0) / 100.0
+    return String.format(Locale.US, "%.2f", rounded).trimEnd('0').trimEnd('.').ifEmpty { "0" }
+}
+
+/** Rescales the existing vehicle mix to the newly entered total without changing its proportions. */
+private fun scaleCategoryIntensities(
+    categories: Map<VehicleClass, String>,
+    targetTotal: Double
+): Map<VehicleClass, String> {
+    val values = VehicleClass.values().associateWith { cls ->
+        categories[cls]?.let(::parseIntensity) ?: 0.0
+    }
+    val currentTotal = values.values.sum()
+    if (targetTotal <= 0.0) {
+        return VehicleClass.values().associateWith { "0" }
+    }
+    if (currentTotal <= 0.0) {
+        return VehicleClass.values().associateWith { cls ->
+            if (cls == VehicleClass.PASSENGER_CAR) formatIntensity(targetTotal) else "0"
+        }
+    }
+
+    val active = values.filterValues { it > 0.0 }.keys.toList()
+    var allocated = 0.0
+    val scaled = VehicleClass.values().associateWith { "0" }.toMutableMap()
+    active.forEachIndexed { index, cls ->
+        val amount = if (index == active.lastIndex) {
+            (targetTotal - allocated).coerceAtLeast(0.0)
+        } else {
+            kotlin.math.round(targetTotal * values.getValue(cls) / currentTotal * 100.0) / 100.0
+        }
+        scaled[cls] = formatIntensity(amount)
+        allocated += amount
+    }
+    return scaled
+}
 
 @Composable
 fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
@@ -143,7 +185,14 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(
                         value = form.total,
-                        onValueChange = { updateForm(connection.id, form.copy(total = it.filter { c -> c.isDigit() || c == '.' || c == ',' })) },
+                        onValueChange = { raw ->
+                            val value = raw.filter { c -> c.isDigit() || c == '.' || c == ',' }
+                            val parsedTotal = parseIntensity(value)
+                            val categories = if (parsedTotal != null) {
+                                scaleCategoryIntensities(form.categories, parsedTotal)
+                            } else form.categories
+                            updateForm(connection.id, form.copy(total = value, categories = categories))
+                        },
                         label = { Text("Общая интенсивность, авт./ч") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
@@ -154,8 +203,14 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                             Text(vehicleClass.displayName(), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                             OutlinedTextField(
                                 value = form.categories[vehicleClass] ?: "0",
-                                onValueChange = { value ->
-                                    updateForm(connection.id, form.copy(categories = form.categories + (vehicleClass to value.filter { c -> c.isDigit() || c == '.' || c == ',' })))
+                                onValueChange = { raw ->
+                                    val value = raw.filter { c -> c.isDigit() || c == '.' || c == ',' }
+                                    val categories = form.categories + (vehicleClass to value)
+                                    val categoryTotal = categories.values.sumOf { parseIntensity(it) ?: 0.0 }
+                                    updateForm(connection.id, form.copy(
+                                        total = formatIntensity(categoryTotal),
+                                        categories = categories
+                                    ))
                                 },
                                 modifier = Modifier.weight(0.8f),
                                 singleLine = true
