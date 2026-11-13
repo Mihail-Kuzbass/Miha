@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.trafficsignalstudio.model.MovementKind
+import ru.trafficsignalstudio.model.LaneFlowDirection
 
 class IntersectionGeometryEditorTest {
     @Test
@@ -67,6 +68,33 @@ class IntersectionGeometryEditorTest {
         val approach = intersection.approaches.first()
         val lane = approach.lanes.first()
         IntersectionGeometryEditor.setLaneMovements(intersection, approach.id, lane.id, emptySet())
+    }
+
+    @Test
+    fun laneFlowDirectionCanBeChangedIndependently() {
+        val intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 2)
+        val approach = intersection.approaches.first()
+        val lane = approach.lanes.first()
+
+        val changed = IntersectionGeometryEditor.setLaneFlowDirection(
+            intersection, approach.id, lane.id, LaneFlowDirection.OUT_OF_INTERSECTION
+        )
+
+        assertEquals(LaneFlowDirection.OUT_OF_INTERSECTION,
+            changed.approaches.first().lanes.first().flowDirection)
+        assertEquals(approach.lanes[1], changed.approaches.first().lanes[1])
+        assertEquals(intersection.approaches[1], changed.approaches[1])
+    }
+
+    @Test
+    fun newLanesInheritFlowDirectionFromExistingLane() {
+        val intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 1)
+        val approach = intersection.approaches.first()
+        val outbound = IntersectionGeometryEditor.setLaneFlowDirection(
+            intersection, approach.id, approach.lanes.first().id, LaneFlowDirection.OUT_OF_INTERSECTION
+        )
+        val expanded = IntersectionGeometryEditor.setLaneCount(outbound, approach.id, 2)
+        assertEquals(LaneFlowDirection.OUT_OF_INTERSECTION, expanded.approaches.first().lanes[1].flowDirection)
     }
 
     @Test(expected = IllegalArgumentException::class)
