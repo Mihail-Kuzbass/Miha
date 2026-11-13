@@ -4,6 +4,7 @@ import ru.trafficsignalstudio.model.Approach
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.Lane
 import ru.trafficsignalstudio.model.LaneFlowDirection
+import ru.trafficsignalstudio.model.LaneConnection
 import ru.trafficsignalstudio.model.MovementKind
 
 /**
@@ -72,14 +73,48 @@ object IntersectionGeometryEditor {
         approachId: String,
         laneId: String,
         direction: LaneFlowDirection
-    ): Intersection = intersection.copy(
-        approaches = intersection.approaches.map { approach ->
+    ): Intersection {
+        val updatedApproaches = intersection.approaches.map { approach ->
             if (approach.id != approachId) approach
             else approach.copy(lanes = approach.lanes.map { lane ->
                 if (lane.id == laneId) lane.copy(flowDirection = direction) else lane
             })
         }
-    )
+        val laneLookup = updatedApproaches.flatMap { approach ->
+            approach.lanes.map { lane -> (approach.id to lane.id) to lane }
+        }.toMap()
+        val validConnections = intersection.laneConnections.filter { connection ->
+            laneLookup[connection.fromApproachId to connection.fromLaneId]?.flowDirection == LaneFlowDirection.INTO_INTERSECTION &&
+                laneLookup[connection.toApproachId to connection.toLaneId]?.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION
+        }
+        return intersection.copy(approaches = updatedApproaches, laneConnections = validConnections)
+    }
+
+    fun addLaneConnection(intersection: Intersection, connection: LaneConnection): Intersection {
+        val source = intersection.approaches.firstOrNull { it.id == connection.fromApproachId }
+            ?.lanes?.firstOrNull { it.id == connection.fromLaneId }
+        val target = intersection.approaches.firstOrNull { it.id == connection.toApproachId }
+            ?.lanes?.firstOrNull { it.id == connection.toLaneId }
+        require(source != null) { "Въездная полоса не найдена" }
+        require(target != null) { "Выездная полоса не найдена" }
+        require(source.flowDirection == LaneFlowDirection.INTO_INTERSECTION) {
+            "Исходная полоса должна быть направлена к перекрёстку"
+        }
+        require(target.flowDirection == LaneFlowDirection.OUT_OF_INTERSECTION) {
+            "Целевая полоса должна быть направлена от перекрёстка"
+        }
+        require(connection.fromApproachId != connection.toApproachId || connection.fromLaneId != connection.toLaneId) {
+            "Нельзя соединить полосу саму с собой"
+        }
+        require(intersection.laneConnections.none {
+            it.fromApproachId == connection.fromApproachId && it.fromLaneId == connection.fromLaneId &&
+                it.toApproachId == connection.toApproachId && it.toLaneId == connection.toLaneId
+        }) { "Такая связь полос уже существует" }
+        return intersection.copy(laneConnections = intersection.laneConnections + connection)
+    }
+
+    fun removeLaneConnection(intersection: Intersection, connectionId: String): Intersection =
+        intersection.copy(laneConnections = intersection.laneConnections.filterNot { it.id == connectionId })
 
     fun validate(intersection: Intersection): List<String> = buildList {
         if (intersection.name.isBlank()) add("Не задано название перекрёстка")
@@ -98,6 +133,19 @@ object IntersectionGeometryEditor {
         intersection.junctionNodes.forEach { node ->
             if (!node.point.xMeters.isFinite() || !node.point.yMeters.isFinite()) add("Узел соединения содержит некорректные координаты")
             if (node.connectedSegmentIds.any { id -> intersection.roadSegments.none { it.id == id } }) add("Узел ссылается на отсутствующий дорожный сегмент")
+        }
+        if (intersection.laneConnections.map { it.id }.distinct().size != intersection.laneConnections.size) {
+            add("Идентификаторы связей полос должны быть уникальными")
+        }
+        intersection.laneConnections.forEach { connection ->
+            val source = intersection.approaches.firstOrNull { it.id == connection.fromApproachId }
+                ?.lanes?.firstOrNull { it.id == connection.fromLaneId }
+            val target = intersection.approaches.firstOrNull { it.id == connection.toApproachId }
+                ?.lanes?.firstOrNull { it.id == connection.toLaneId }
+            if (source == null) add("Связь полосы ссылается на отсутствующую въездную полосу")
+            else if (source.flowDirection != LaneFlowDirection.INTO_INTERSECTION) add("Исходная полоса связи не направлена к перекрёстку")
+            if (target == null) add("Связь полосы ссылается на отсутствующую выездную полосу")
+            else if (target.flowDirection != LaneFlowDirection.OUT_OF_INTERSECTION) add("Целевая полоса связи не направлена от перекрёстка")
         }
         if (intersection.safetyIslands.map { it.id }.distinct().size != intersection.safetyIslands.size) {
             add("Идентификаторы островков безопасности должны быть уникальными")
