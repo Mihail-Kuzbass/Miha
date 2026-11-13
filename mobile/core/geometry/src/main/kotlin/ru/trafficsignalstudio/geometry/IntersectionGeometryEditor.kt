@@ -50,7 +50,9 @@ object IntersectionGeometryEditor {
 
     fun validate(intersection: Intersection): List<String> = buildList {
         if (intersection.name.isBlank()) add("Не задано название перекрёстка")
-        if (intersection.approaches.size < 2) add("Недостаточно дорожных подходов")
+        if (intersection.approaches.size < 2 && intersection.roadSegments.isEmpty()) {
+            add("Недостаточно дорожных подходов или дорожных сегментов")
+        }
         if (intersection.approaches.map { it.id }.distinct().size != intersection.approaches.size) {
             add("Идентификаторы подходов должны быть уникальными")
         }
