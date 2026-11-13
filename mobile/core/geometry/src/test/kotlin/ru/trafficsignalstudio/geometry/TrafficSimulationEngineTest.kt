@@ -45,6 +45,42 @@ class TrafficSimulationEngineTest {
         assertTrue(result.snapshots.isNotEmpty())
     }
 
+
+    @Test fun vehiclesRespectPhysicalLengthAndMinimumFollowingGap() {
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 2400.0,
+                mapOf(VehicleClass.CITY_BUS to 600.0, VehicleClass.PASSENGER_CAR to 900.0))),
+            durationSeconds = 300,
+            approachStorageLengthMeters = 45.0,
+            minimumGapMeters = 2.0
+        ))
+        assertTrue(result.maximumLaneStorageUtilizationPercent <= 100.0 + 1e-6)
+        assertTrue(result.upstreamQueueAtEnd > 0 || result.totalQueueAtEnd > 0)
+        val snapshot = result.snapshots.last()
+        val laneVehicles = snapshot.activeVehicles
+            .filter { it.distanceToStopLineMeters != null && it.distanceToStopLineMeters <= 45.0 + 1e-6 }
+            .sortedBy { it.distanceToStopLineMeters }
+        laneVehicles.zipWithNext().forEach { (leader, follower) ->
+            val leaderRear = leader.distanceToStopLineMeters!! + leader.lengthMeters
+            assertTrue(
+                "Vehicle bodies overlap or gap is too small: leader=$leader follower=$follower",
+                follower.distanceToStopLineMeters!! - leaderRear >= 1.9
+            )
+        }
+    }
+
+    @Test fun longVehiclesUseMorePhysicalStorageThanPassengerCars() {
+        val busResult = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 2400.0,
+                mapOf(VehicleClass.CITY_BUS to 2400.0))),
+            durationSeconds = 240,
+            approachStorageLengthMeters = 45.0
+        ))
+        val busSprites = busResult.snapshots.flatMap { it.activeVehicles }
+        assertTrue(busSprites.any { it.vehicleClass == VehicleClass.CITY_BUS && it.lengthMeters == 12.0 })
+        assertTrue(busResult.maximumLaneStorageUtilizationPercent > 0.0)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsClassFlowsAboveTotalFlow() {
         MovementTrafficDemand("m1", 100.0, mapOf(VehicleClass.CITY_BUS to 120.0))
