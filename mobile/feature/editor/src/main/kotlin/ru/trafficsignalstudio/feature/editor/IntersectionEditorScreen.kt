@@ -318,7 +318,7 @@ fun IntersectionEditorScreen(
                         }
                     }
                     Text("Настройка полос", style = MaterialTheme.typography.titleSmall)
-                    Text("Нумерация от правого края проезжей части по ходу движения.")
+                    Text("Стрелка на схеме показывает фактическое направление потока по каждой полосе.")
                     selectedApproach.lanes.sortedBy { it.index }.forEach { lane ->
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
@@ -359,7 +359,7 @@ fun IntersectionEditorScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                 val inbound = lane.flowDirection == LaneFlowDirection.INTO_INTERSECTION
                                 if (inbound) {
-                                    Button(onClick = {}) { Text("↓ К перекрёстку") }
+                                    Button(onClick = { updateIntersection(IntersectionGeometryEditor.setLaneFlowDirection(intersection, selectedApproach.id, lane.id, LaneFlowDirection.INTO_INTERSECTION)) }) { Text("↓ К перекрёстку") }
                                 } else {
                                     OutlinedButton(onClick = {
                                         updateIntersection(IntersectionGeometryEditor.setLaneFlowDirection(
@@ -368,7 +368,7 @@ fun IntersectionEditorScreen(
                                     }) { Text("↓ К перекрёстку") }
                                 }
                                 if (!inbound) {
-                                    Button(onClick = {}) { Text("↑ От перекрёстка") }
+                                    Button(onClick = { updateIntersection(IntersectionGeometryEditor.setLaneFlowDirection(intersection, selectedApproach.id, lane.id, LaneFlowDirection.OUT_OF_INTERSECTION)) }) { Text("↑ От перекрёстка") }
                                 } else {
                                     OutlinedButton(onClick = {
                                         updateIntersection(IntersectionGeometryEditor.setLaneFlowDirection(
