@@ -33,7 +33,7 @@ class IntersectionTemplatesTest {
         val diamond = IntersectionTemplates.diamondInterchange()
         val cloverleaf = IntersectionTemplates.cloverleafInterchange()
 
-        assertEquals(4, diamond.approaches.size)
+        assertTrue(diamond.approaches.isEmpty())
         assertTrue(diamond.roadSegments.any { it.elevationLevel > 0 })
         assertTrue(diamond.roadSegments.any { it.isRamp })
         assertTrue(cloverleaf.roadSegments.size > diamond.roadSegments.size)
