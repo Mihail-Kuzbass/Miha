@@ -494,8 +494,11 @@ object TrafficSimulationEngine {
             if (vehicle.speedMetersPerSecond < 0.5) return null
             val serviceDeceleration = vehicle.waiting.model.serviceDecelerationMetersPerSecondSquared
                 .coerceAtLeast(0.5)
-            val sampleSeconds = 0.25
-            val horizonSeconds = 3.0
+            // Look far enough ahead for a vehicle travelling at 50 km/h to
+            // brake before reaching the conflict area. Fine sampling avoids
+            // stepping over a short overlap between perpendicular envelopes.
+            val sampleSeconds = 0.1
+            val horizonSeconds = 8.0
             val conflictingIds = conflictingConnectionsById[state.connectionId].orEmpty()
             if (conflictingIds.isEmpty()) return null
             val possibleConflicts = states.values.asSequence()
@@ -538,8 +541,11 @@ object TrafficSimulationEngine {
                 }
             }
             val timeToContact = earliestContact ?: return null
-            // Begin braking early enough to stop before the predicted contact.
-            val requiredDeceleration = (vehicle.speedMetersPerSecond / (2.0 * timeToContact))
+            // The previous half-rate estimate allowed the vehicle to cover
+            // almost the entire predicted gap before stopping. Use the full
+            // time-to-contact requirement and reserve a reaction/safety margin.
+            val usableTime = (timeToContact - 0.4).coerceAtLeast(0.2)
+            val requiredDeceleration = (vehicle.speedMetersPerSecond / usableTime)
                 .coerceIn(0.8, serviceDeceleration)
             return -requiredDeceleration
         }
