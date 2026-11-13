@@ -1,0 +1,59 @@
+name: Android Mobile CI
+
+on:
+  push:
+    branches:
+      - feature/android-mobile-foundation
+  pull_request:
+    branches:
+      - main
+      - feature/android-mobile-foundation
+    paths:
+      - "mobile/**"
+      - ".github/workflows/android-mobile.yml"
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.9.1"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK platform
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
+      - name: Run domain tests
+        run: |
+          gradle :core:model:test
+          gradle :core:geometry:test
+
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug
+
+      - name: Run Android unit tests
+        run: gradle :app:testDebugUnitTest
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrafficSignalStudio-Mobile-debug
+          path: mobile/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
