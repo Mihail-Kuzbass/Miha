@@ -86,6 +86,11 @@ fun IntersectionEditorScreen(
     onSave: () -> Unit,
     onProjectChange: (ProjectDocument) -> Unit
 ) {
+    var showSimulation by remember(intersection?.id) { mutableStateOf(false) }
+    if (showSimulation && intersection != null) {
+        TrafficSimulationScreen(intersection = intersection, onBack = { showSimulation = false })
+        return
+    }
     var selectedApproachIndex by remember(intersection?.id) { mutableIntStateOf(0) }
     var drawingTool by remember(intersection?.id) { mutableStateOf(DrawingTool.LINE) }
     var editMode by remember(intersection?.id) { mutableStateOf(false) }
@@ -151,7 +156,10 @@ fun IntersectionEditorScreen(
                 Text("Геометрический редактор", style = MaterialTheme.typography.titleLarge)
                 Text(project.name, style = MaterialTheme.typography.bodySmall)
             }
-            OutlinedButton(onClick = onBack) { Text("Назад") }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = { showSimulation = true }, enabled = intersection != null) { Text("Моделирование") }
+                OutlinedButton(onClick = onBack) { Text("Назад") }
+            }
         }
 
         // Keep a real, visible drawing surface on short phone screens.
