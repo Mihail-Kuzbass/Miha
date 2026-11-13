@@ -14,6 +14,7 @@ import ru.trafficsignalstudio.model.SignalPhase
 import ru.trafficsignalstudio.model.SignalPlan
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.RoadSegment
+import ru.trafficsignalstudio.model.VehicleModelCatalog
 
 class TrajectoryConflictAnalyzerTest {
     private fun crossingMovementIntersection(plan: SignalPlan? = null): Intersection {
@@ -49,6 +50,16 @@ class TrajectoryConflictAnalyzerTest {
         assertEquals(1, conflicts.size)
         assertEquals(TrajectoryConflictKind.CROSSING, conflicts.single().kind)
         assertEquals(ConflictSignalStatus.NO_SIGNAL_PLAN, conflicts.single().signalStatus)
+    }
+
+    @Test
+    fun selectedVehicleModelControlsTrajectoryEnvelopeWidth() {
+        val intersection = crossingMovementIntersection()
+        val bus = VehicleModelCatalog.defaults.first { it.id == "city-bus-12m" }
+        val trajectories = TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection, bus)
+        assertEquals(2, trajectories.size)
+        assertTrue(trajectories.all { it.vehicleModelId == bus.id })
+        assertTrue(trajectories.all { kotlin.math.abs(it.vehicleWidthMeters - bus.widthMeters) < 1e-9 })
     }
 
     @Test
