@@ -337,9 +337,14 @@ object TrafficSimulationEngine {
                     val model = vehicle.waiting.model
                     val onApproach = vehicle.positionMeters < 0.0
                     val leaders = if (onApproach) {
-                        ordered.map { it.second }.filter {
-                            it !== vehicle && it.positionMeters <= 0.0 && it.positionMeters > vehicle.positionMeters
-                        }
+                        ordered.filter { candidate ->
+                            val candidateState = candidate.first
+                            val candidateVehicle = candidate.second
+                            candidateVehicle !== vehicle &&
+                                candidateVehicle.positionMeters > vehicle.positionMeters &&
+                                (candidateVehicle.positionMeters <= 0.0 ||
+                                    candidateState.connectionId == state.connectionId)
+                        }.map { it.second }
                     } else {
                         state.vehicles.filter {
                             it !== vehicle && it.positionMeters > vehicle.positionMeters
