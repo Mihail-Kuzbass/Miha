@@ -188,6 +188,37 @@ class IntersectionGeometryEditorTest {
         assertEquals(ru.trafficsignalstudio.model.LaneTravelDirection.AGAINST_CENTERLINE, first[1].travelDirection)
     }
 
+    @Test
+    fun roadLaneMovementPermissionsAreIndependentAndInheritedWhenExpanded() {
+        val road = ru.trafficsignalstudio.model.RoadSegment(
+            name = "Дорога с поворотной полосой",
+            centerline = listOf(
+                ru.trafficsignalstudio.model.Point2D(0.0, 0.0),
+                ru.trafficsignalstudio.model.Point2D(30.0, 0.0)
+            ),
+            widthMeters = 7.0,
+            laneCount = 2
+        )
+        val intersection = ru.trafficsignalstudio.model.Intersection(
+            name = "Тест направлений",
+            type = ru.trafficsignalstudio.model.IntersectionType.CUSTOM,
+            approaches = emptyList(),
+            roadSegments = listOf(road)
+        )
+        val firstLane = IntersectionGeometryEditor.effectiveRoadLanes(road).first()
+        val configured = IntersectionGeometryEditor.setRoadLaneMovements(
+            intersection, road.id, firstLane.id,
+            setOf(MovementKind.LEFT, MovementKind.U_TURN)
+        )
+        val expanded = IntersectionGeometryEditor.setRoadLaneCount(configured, road.id, 3)
+        val lanes = expanded.roadSegments.single().lanes
+
+        assertEquals(setOf(MovementKind.LEFT, MovementKind.U_TURN), lanes.first().allowedMovements)
+        assertEquals(setOf(MovementKind.LEFT, MovementKind.U_TURN), lanes.last().allowedMovements)
+        assertEquals(ru.trafficsignalstudio.model.LaneTravelDirection.ALONG_CENTERLINE,
+            lanes.first().travelDirection)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun laneCountOutsideSupportedRangeIsRejected() {
         val intersection = IntersectionTemplates.fourLeg()
