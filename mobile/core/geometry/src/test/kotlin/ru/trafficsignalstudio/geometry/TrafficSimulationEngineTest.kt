@@ -81,6 +81,49 @@ class TrafficSimulationEngineTest {
         assertTrue(busResult.maximumQueueLengthMeters > 0.0)
     }
 
+
+    @Test fun vehiclesRespectPhysicalLengthAndSafeFollowingGap() {
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 7200.0)),
+            durationSeconds = 120,
+            approachStorageLengthMeters = 120.0
+        ))
+        assertTrue(result.physicalLaneVehiclesAtEnd > 0)
+        assertTrue(result.maximumLaneStorageUtilizationPercent > 0.0)
+        result.snapshots.forEach { snapshot ->
+            val approachVehicles = snapshot.activeVehicles
+                .filter { it.connectionId == "m1" && it.positionMeters <= 0.0 }
+                .sortedByDescending { it.positionMeters }
+            approachVehicles.zipWithNext().forEach { (leader, follower) ->
+                val gap = leader.positionMeters - leader.lengthMeters - follower.positionMeters
+                assertTrue("Unsafe bumper gap $gap m", gap >= 1.9)
+            }
+        }
+    }
+
+    @Test fun finiteApproachStorageReportsUpstreamSpillback() {
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 7200.0)),
+            durationSeconds = 120,
+            approachStorageLengthMeters = 20.0
+        ))
+        assertTrue(result.upstreamQueueAtEnd > 0)
+        assertTrue(result.maximumSpillbackVehicles > 0)
+        assertTrue(result.laneStorageUtilizationPercent <= 100.0)
+        assertTrue(result.maximumLaneStorageUtilizationPercent <= 100.0)
+    }
+
+    @Test fun vehicleCategoryUsesItsPhysicalVehicleLengthInSnapshots() {
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 3600.0,
+                mapOf(VehicleClass.CITY_BUS to 3600.0))),
+            durationSeconds = 120
+        ))
+        assertTrue(result.snapshots.flatMap { it.activeVehicles }.any {
+            it.vehicleClass == VehicleClass.CITY_BUS && kotlin.math.abs(it.lengthMeters - 12.0) < 0.01
+        })
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsClassFlowsAboveTotalFlow() {
         MovementTrafficDemand("m1", 100.0, mapOf(VehicleClass.CITY_BUS to 120.0))
