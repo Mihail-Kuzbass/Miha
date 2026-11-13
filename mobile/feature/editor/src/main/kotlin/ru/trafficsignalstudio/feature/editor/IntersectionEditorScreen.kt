@@ -332,7 +332,7 @@ private fun IntersectionGeometryPreview(
                         screenPoints.drop(1).forEach { lineTo(it.x, it.y) }
                     }
                 }
-                val width = (segment.widthMeters.toFloat() * scale).coerceAtLeast(10f)
+                val width = (segment.widthMeters.toFloat() * scale * 0.35f).coerceAtLeast(10f)
                 val roundStroke = Stroke(width = width, cap = StrokeCap.Round,
                     join = androidx.compose.ui.graphics.StrokeJoin.Round)
                 if (segment.elevationLevel > 0 || segment.kind == RoadSegmentKind.BRIDGE) {
