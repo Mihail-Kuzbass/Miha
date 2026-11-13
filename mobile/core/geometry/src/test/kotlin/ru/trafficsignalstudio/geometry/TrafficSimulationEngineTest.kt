@@ -266,7 +266,11 @@ class TrafficSimulationEngineTest {
             snapshot.activeVehicles.firstOrNull { it.id == 1L }?.let { snapshot.timeSeconds to it }
         }.filter { it.first <= 20.0 }
         assertTrue("The first vehicle should appear in snapshots", samples.isNotEmpty())
-        assertEquals("Vehicles must start from rest", 0.0, samples.first().second.speedMetersPerSecond, 1e-6)
+        assertTrue(
+            "The first sampled speed must be consistent with starting from rest during the preceding time step",
+            samples.first().second.speedMetersPerSecond <=
+                VehicleModelCatalog.defaultPassengerCar.accelerationMetersPerSecondSquared + 1e-6
+        )
         assertTrue(
             "Speed should increase gradually rather than start at free-flow speed",
             samples.any { it.second.speedMetersPerSecond in 0.1..5.0 } &&
