@@ -106,6 +106,24 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
         }
         Text("Интенсивность задаётся отдельно для каждого разрешённого движения. Категориальные значения входят в общую интенсивность, а не прибавляются к ней.",
             style = MaterialTheme.typography.bodySmall)
+        val totalObjectFlow = forms.values.sumOf { it.total.replace(',', '.').toDoubleOrNull() ?: 0.0 }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Суммарная интенсивность объекта", style = MaterialTheme.typography.titleMedium)
+                Text("${"%.0f".format(totalObjectFlow)} авт./ч", style = MaterialTheme.typography.headlineSmall)
+                VehicleClass.values().forEach { cls ->
+                    val classFlow = forms.values.sumOf { form ->
+                        form.categories[cls]?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+                    }
+                    if (classFlow > 0.0) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(cls.displayName(), style = MaterialTheme.typography.bodySmall)
+                            Text("${"%.0f".format(classFlow)} авт./ч", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
         if (intersection.signalPlan == null || intersection.signalPlan.phases.isEmpty()) {
             Card { Text("Для моделирования выпуска транспорта настройте светофорный план и назначьте движения фазам.",
                 modifier = Modifier.padding(12.dp)) }
