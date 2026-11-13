@@ -697,10 +697,33 @@ private fun IntersectionGeometryPreview(
                     val headBaseY = if (towardCenter) tipY - 8f else tipY + 8f
                     val lanePixelWidth = lane.widthMeters.toFloat() * scale
                     if (lanePixelWidth >= 13f) {
-                        drawLine(Color.White, Offset(laneCenterX, tailY), Offset(laneCenterX, tipY), 3f, cap = StrokeCap.Round)
-                        val wing = min(6f, lanePixelWidth * 0.22f)
-                        drawLine(Color.White, Offset(laneCenterX, tipY), Offset(laneCenterX - wing, headBaseY), 3f, cap = StrokeCap.Round)
-                        drawLine(Color.White, Offset(laneCenterX, tipY), Offset(laneCenterX + wing, headBaseY), 3f, cap = StrokeCap.Round)
+                        if (towardCenter) {
+                            // Render the configured lane manoeuvres as road markings.
+                            // Multiple arrows are arranged longitudinally so they remain
+                            // readable even on a narrow single lane.
+                            val movements = lane.allowedMovements
+                                .filter { it == MovementKind.THROUGH || it == MovementKind.LEFT ||
+                                    it == MovementKind.RIGHT || it == MovementKind.U_TURN }
+                                .sortedBy { it.ordinal }
+                            val iconSize = min(16f, lanePixelWidth * 0.82f).coerceAtLeast(8f)
+                            val spacing = if (movements.size > 1) iconSize * 0.78f else 0f
+                            movements.forEachIndexed { index, movement ->
+                                val offsetY = (index - (movements.size - 1) / 2f) * spacing
+                                drawMovementArrow(
+                                    x = laneCenterX,
+                                    y = arrowY + offsetY,
+                                    movement = movement,
+                                    color = Color.White,
+                                    size = iconSize
+                                )
+                            }
+                        } else {
+                            // Outbound lanes retain a simple arrow pointing away from the node.
+                            drawLine(Color.White, Offset(laneCenterX, tailY), Offset(laneCenterX, tipY), 3f, cap = StrokeCap.Round)
+                            val wing = min(6f, lanePixelWidth * 0.22f)
+                            drawLine(Color.White, Offset(laneCenterX, tipY), Offset(laneCenterX - wing, headBaseY), 3f, cap = StrokeCap.Round)
+                            drawLine(Color.White, Offset(laneCenterX, tipY), Offset(laneCenterX + wing, headBaseY), 3f, cap = StrokeCap.Round)
+                        }
                     }
                     laneOffset += lane.widthMeters.toFloat() * scale
                 }
@@ -794,6 +817,49 @@ private fun IntersectionGeometryPreview(
             }
         }
         drawCircle(Color(0xFF20262D), radius = 4f, center = center, style = Stroke(width = 2f))
+    }
+}
+
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMovementArrow(
+    x: Float,
+    y: Float,
+    movement: MovementKind,
+    color: Color,
+    size: Float
+) {
+    val half = size / 2f
+    val path = Path()
+    when (movement) {
+        MovementKind.THROUGH -> {
+            path.moveTo(x, y + half)
+            path.lineTo(x, y - half)
+            drawPath(path, color, style = Stroke(width = 2.5f, cap = StrokeCap.Round))
+            drawLine(color, Offset(x, y - half), Offset(x - half * 0.48f, y - half * 0.25f), 2.5f, cap = StrokeCap.Round)
+            drawLine(color, Offset(x, y - half), Offset(x + half * 0.48f, y - half * 0.25f), 2.5f, cap = StrokeCap.Round)
+        }
+        MovementKind.LEFT -> {
+            path.moveTo(x, y + half)
+            path.cubicTo(x, y, x - half, y, x - half, y - half * 0.15f)
+            drawPath(path, color, style = Stroke(width = 2.5f, cap = StrokeCap.Round))
+            drawLine(color, Offset(x - half, y - half * 0.15f), Offset(x - half * 0.72f, y + half * 0.22f), 2.5f, cap = StrokeCap.Round)
+            drawLine(color, Offset(x - half, y - half * 0.15f), Offset(x - half * 0.28f, y - half * 0.15f), 2.5f, cap = StrokeCap.Round)
+        }
+        MovementKind.RIGHT -> {
+            path.moveTo(x, y + half)
+            path.cubicTo(x, y, x + half, y, x + half, y - half * 0.15f)
+            drawPath(path, color, style = Stroke(width = 2.5f, cap = StrokeCap.Round))
+            drawLine(color, Offset(x + half, y - half * 0.15f), Offset(x + half * 0.28f, y - half * 0.15f), 2.5f, cap = StrokeCap.Round)
+            drawLine(color, Offset(x + half, y - half * 0.15f), Offset(x + half * 0.72f, y + half * 0.22f), 2.5f, cap = StrokeCap.Round)
+        }
+        MovementKind.U_TURN -> {
+            path.moveTo(x, y + half)
+            path.cubicTo(x - half * 0.9f, y + half * 0.1f, x - half * 0.9f, y - half, x, y - half * 0.45f)
+            drawPath(path, color, style = Stroke(width = 2.5f, cap = StrokeCap.Round))
+            drawLine(color, Offset(x, y - half * 0.45f), Offset(x - half * 0.32f, y - half * 0.1f), 2.5f, cap = StrokeCap.Round)
+            drawLine(color, Offset(x, y - half * 0.45f), Offset(x + half * 0.32f, y - half * 0.1f), 2.5f, cap = StrokeCap.Round)
+        }
+        MovementKind.TRANSIT_ONLY -> Unit
     }
 }
 
