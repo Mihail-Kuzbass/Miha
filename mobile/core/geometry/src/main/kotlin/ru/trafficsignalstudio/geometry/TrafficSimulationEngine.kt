@@ -39,7 +39,9 @@ data class TrafficSimulationDemand(
     /** Usable upstream storage length measured from the stop line, metres. */
     val approachStorageLengthMeters: Double = 120.0,
     /** Free-flow speed at the upstream boundary, km/h. */
-    val approachSpeedKmh: Double = 30.0
+    val approachSpeedKmh: Double = 30.0,
+    /** Optional global lower bound; when absent, vehicle-class-specific gaps are used. */
+    val minimumGapMeters: Double? = null
 ) {
     init {
         require(durationSeconds in 60..7200)
@@ -47,6 +49,7 @@ data class TrafficSimulationDemand(
         require(movements.map { it.connectionId }.distinct().size == movements.size)
         require(approachStorageLengthMeters.isFinite() && approachStorageLengthMeters in 20.0..1000.0)
         require(approachSpeedKmh.isFinite() && approachSpeedKmh in 5.0..80.0)
+        require(minimumGapMeters == null || (minimumGapMeters.isFinite() && minimumGapMeters in 0.5..10.0))
     }
 }
 
@@ -232,9 +235,13 @@ object TrafficSimulationEngine {
             }
         }
 
-        fun createModel(vehicleClass: VehicleClass?): VehicleModel =
-            vehicleClass?.let { cls -> VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls } }
+        fun createModel(vehicleClass: VehicleClass?): VehicleModel {
+            val base = vehicleClass?.let { cls -> VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls } }
                 ?: VehicleModelCatalog.defaultPassengerCar
+            val configuredGap = demand.minimumGapMeters ?: base.minimumGapMeters
+            return if (configuredGap == base.minimumGapMeters) base
+                else base.copy(minimumGapMeters = configuredGap)
+        }
 
         fun approachQueueLength(agents: List<VehicleAgent>): Double {
             val approach = agents.filter { it.positionMeters <= 0.0 }
