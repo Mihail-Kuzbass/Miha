@@ -3,6 +3,7 @@ package ru.trafficsignalstudio.geometry
 import ru.trafficsignalstudio.model.Approach
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.Lane
+import ru.trafficsignalstudio.model.MovementKind
 
 /**
  * Pure geometry-editing operations. All dimensions are stored in metres;
@@ -43,6 +44,23 @@ object IntersectionGeometryEditor {
                         widthMeters = (lane.widthMeters + deltaMeters)
                             .coerceIn(MIN_LANE_WIDTH_METERS, MAX_LANE_WIDTH_METERS)
                     )
+                })
+            }
+        )
+    }
+
+    fun setLaneMovements(
+        intersection: Intersection,
+        approachId: String,
+        laneId: String,
+        movements: Set<MovementKind>
+    ): Intersection {
+        require(movements.isNotEmpty()) { "Для полосы должно быть задано хотя бы одно направление" }
+        return intersection.copy(
+            approaches = intersection.approaches.map { approach ->
+                if (approach.id != approachId) approach
+                else approach.copy(lanes = approach.lanes.map { lane ->
+                    if (lane.id == laneId) lane.copy(allowedMovements = movements) else lane
                 })
             }
         )
