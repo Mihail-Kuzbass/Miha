@@ -238,7 +238,7 @@ object TrafficSimulationEngine {
         fun createModel(vehicleClass: VehicleClass?): VehicleModel {
             val base = vehicleClass?.let { cls -> VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls } }
                 ?: VehicleModelCatalog.defaultPassengerCar
-            val configuredGap = demand.minimumGapMeters ?: base.minimumGapMeters
+            val configuredGap = max(base.minimumGapMeters, demand.minimumGapMeters ?: 0.0)
             return if (configuredGap == base.minimumGapMeters) base
                 else base.copy(minimumGapMeters = configuredGap)
         }
