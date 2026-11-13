@@ -438,6 +438,64 @@ object TrafficSimulationEngine {
             }
         }
 
+        /**
+         * Predicts near-future body-envelope conflicts with vehicles on other
+         * movements. The vehicle with the later simulation ID yields, giving
+         * every conflict a deterministic priority and preventing both drivers
+         * from stopping forever at the same conflict point.
+         */
+        fun predictiveCollisionBrake(state: MovementState, vehicle: VehicleAgent): Double? {
+            if (vehicle.speedMetersPerSecond < 0.5) return null
+            val serviceDeceleration = vehicle.waiting.model.serviceDecelerationMetersPerSecondSquared
+                .coerceAtLeast(0.5)
+            val sampleSeconds = 0.25
+            val horizonSeconds = 3.0
+            val possibleConflicts = states.values.asSequence()
+                .filter { it.connectionId != state.connectionId }
+                .flatMap { otherState ->
+                    otherState.vehicles.asSequence()
+                        .filter { other ->
+                            other.waiting.id < vehicle.waiting.id &&
+                                other.crashedUntilSeconds?.let { time < it } != true &&
+                                other.speedMetersPerSecond > 0.25
+                        }
+                        .map { otherState to it }
+                }
+            var earliestContact: Double? = null
+            for ((otherState, other) in possibleConflicts) {
+                var futureTime = sampleSeconds
+                while (futureTime <= horizonSeconds + 1e-9) {
+                    val ownFuturePosition = vehicle.positionMeters +
+                        vehicle.speedMetersPerSecond * futureTime
+                    val otherFuturePosition = other.positionMeters +
+                        other.speedMetersPerSecond * futureTime
+                    val ownPose = worldPose(
+                        state, vehicle, ownFuturePosition, vehicle.passingOffsetMeters
+                    )
+                    val otherPose = worldPose(
+                        otherState, other, otherFuturePosition, other.passingOffsetMeters
+                    )
+                    if (rectanglesOverlap(
+                            ownPose.first, ownPose.second,
+                            vehicle.waiting.model.lengthMeters, vehicle.waiting.model.widthMeters,
+                            otherPose.first, otherPose.second,
+                            other.waiting.model.lengthMeters, other.waiting.model.widthMeters
+                        )) {
+                        if (earliestContact == null || futureTime < earliestContact) {
+                            earliestContact = futureTime
+                        }
+                        break
+                    }
+                    futureTime += sampleSeconds
+                }
+            }
+            val timeToContact = earliestContact ?: return null
+            // Begin braking early enough to stop before the predicted contact.
+            val requiredDeceleration = (vehicle.speedMetersPerSecond / (2.0 * timeToContact))
+                .coerceIn(0.8, serviceDeceleration)
+            return -requiredDeceleration
+        }
+
         fun rectanglesOverlap(
             firstCenter: Point2D,
             firstDirection: Point2D,
@@ -737,7 +795,10 @@ object TrafficSimulationEngine {
                             vehicle.positionMeters > obstacle.positionMeters + vehicle.waiting.model.lengthMeters + 5.0
                         val desiredOffset = when {
                             alreadyPassing && !clearOfObstacle -> sourceLane.widthMeters
-                            obstacle != null && isBlocked(sourceState.connectionId, time) -> {
+                            obstacle != null -> {
+                                // The crash may belong to another turning movement
+                                // that shares this physical lane. Its own connection
+                                // being blocked is sufficient reason to pass it.
                                 val passDistance = (obstacle.positionMeters - vehicle.positionMeters +
                                     vehicle.waiting.model.lengthMeters + 5.0).coerceAtLeast(0.0)
                                 if (opposingGapIsSafe(sourceState, vehicle, passDistance, sourceLane.widthMeters))
@@ -798,7 +859,10 @@ object TrafficSimulationEngine {
                     }
 
                     val desiredSpeed = min(demand.approachSpeedKmh, model.maximumSpeedKmh) / 3.6
-                    val acceleration = idmAcceleration(vehicle, obstacleGap, obstacleSpeed, desiredSpeed)
+                    val followingAcceleration = idmAcceleration(vehicle, obstacleGap, obstacleSpeed, desiredSpeed)
+                    val collisionAvoidanceAcceleration = predictiveCollisionBrake(state, vehicle)
+                    val acceleration = if (collisionAvoidanceAcceleration == null) followingAcceleration
+                        else min(followingAcceleration, collisionAvoidanceAcceleration)
                     val oldPosition = vehicle.positionMeters
                     val nextSpeed = (vehicle.speedMetersPerSecond + acceleration * step)
                         .coerceIn(0.0, desiredSpeed.coerceAtLeast(0.1))
