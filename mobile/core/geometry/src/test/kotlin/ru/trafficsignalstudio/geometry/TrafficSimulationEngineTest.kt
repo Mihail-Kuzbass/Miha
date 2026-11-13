@@ -73,6 +73,15 @@ class TrafficSimulationEngineTest {
         assertTrue(result.spillbackVehiclesAtEnd > 0)
         assertTrue(result.maximumSpillbackVehicles > 0)
         assertTrue(result.maximumQueueLengthMeters <= 20.0 + 1e-6)
+        val finalSnapshot = result.snapshots.last()
+        val queuedSprites = finalSnapshot.activeVehicles
+            .filter { it.positionMeters <= 0.0 }
+            .sortedByDescending { it.positionMeters }
+        assertTrue(queuedSprites.any { it.positionMeters < -20.0 })
+        queuedSprites.zipWithNext().forEach { (leader, follower) ->
+            val gap = leader.positionMeters - leader.lengthMeters - follower.positionMeters
+            assertTrue("Spillback vehicles overlap: $gap m", gap >= 1.9)
+        }
     }
 
     @Test fun vehicleCategoryUsesItsPhysicalVehicleLengthInSnapshots() {
