@@ -123,6 +123,53 @@ class IntersectionGeometryEditorTest {
         assertTrue(removed.laneConnections.isEmpty())
     }
 
+    @Test
+    fun changingAllowedTurnsRemovesNowInvalidLaneConnectionsAndSignalAssignments() {
+        var intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 1)
+        val source = intersection.approaches[0]
+        val target = intersection.approaches[2]
+        intersection = IntersectionGeometryEditor.setLaneFlowDirection(
+            intersection, target.id, target.lanes.first().id, LaneFlowDirection.OUT_OF_INTERSECTION
+        )
+        val connection = LaneConnection(
+            id = "through-connection",
+            fromApproachId = source.id,
+            fromLaneId = source.lanes.first().id,
+            toApproachId = target.id,
+            toLaneId = target.lanes.first().id
+        )
+        intersection = IntersectionGeometryEditor.addLaneConnection(intersection, connection)
+        intersection = intersection.copy(signalPlan = ru.trafficsignalstudio.model.SignalPlan(
+            phases = listOf(ru.trafficsignalstudio.model.SignalPhase(
+                id = "phase", name = "Основная", greenConnectionIds = setOf(connection.id)
+            ))
+        ))
+
+        val changed = IntersectionGeometryEditor.setLaneMovements(
+            intersection, source.id, source.lanes.first().id, setOf(MovementKind.LEFT)
+        )
+
+        assertTrue(changed.laneConnections.isEmpty())
+        assertTrue(changed.signalPlan!!.phases.single().greenConnectionIds.isEmpty())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun laneConnectionRejectsTurnNotAllowedOnSourceLane() {
+        var intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 1)
+        val source = intersection.approaches[0]
+        val target = intersection.approaches[2]
+        intersection = IntersectionGeometryEditor.setLaneMovements(
+            intersection, source.id, source.lanes.first().id, setOf(MovementKind.LEFT)
+        )
+        intersection = IntersectionGeometryEditor.setLaneFlowDirection(
+            intersection, target.id, target.lanes.first().id, LaneFlowDirection.OUT_OF_INTERSECTION
+        )
+        IntersectionGeometryEditor.addLaneConnection(intersection, LaneConnection(
+            fromApproachId = source.id, fromLaneId = source.lanes.first().id,
+            toApproachId = target.id, toLaneId = target.lanes.first().id
+        ))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun laneConnectionRejectsOutboundSource() {
         var intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 1)
