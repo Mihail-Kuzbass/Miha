@@ -12,15 +12,16 @@ class SignalPlanTimingAnalyzerTest {
 
     @Test fun calculatesSequentialCycleAndClearanceWindows() {
         val report = SignalPlanTimingAnalyzer.analyze(intersection(SignalPlan(phases = listOf(
-            SignalPhase(id = "p1", name = "Первая", greenConnectionIds = setOf("move"), greenSeconds = 20, yellowSeconds = 3, allRedSeconds = 2),
-            SignalPhase(id = "p2", name = "Вторая", greenConnectionIds = setOf("move-2"), greenSeconds = 30, yellowSeconds = 3, allRedSeconds = 1)
+            SignalPhase(id = "p1", name = "Первая", greenConnectionIds = setOf("move"), greenSeconds = 20, flashingGreenSeconds = 4, yellowSeconds = 3, allRedSeconds = 2),
+            SignalPhase(id = "p2", name = "Вторая", greenConnectionIds = setOf("move-2"), greenSeconds = 30, flashingGreenSeconds = 2, yellowSeconds = 3, allRedSeconds = 1)
         ))))
-        assertEquals(59, report.cycleLengthSeconds)
+        assertEquals(65, report.cycleLengthSeconds)
         assertEquals(0, report.phaseWindows[0].startSeconds)
         assertEquals(20, report.phaseWindows[0].greenEndSeconds)
-        assertEquals(23, report.phaseWindows[0].yellowEndSeconds)
-        assertEquals(25, report.phaseWindows[0].allRedEndSeconds)
-        assertEquals(25, report.phaseWindows[1].startSeconds)
+        assertEquals(24, report.phaseWindows[0].flashingGreenEndSeconds)
+        assertEquals(27, report.phaseWindows[0].yellowEndSeconds)
+        assertEquals(29, report.phaseWindows[0].allRedEndSeconds)
+        assertEquals(29, report.phaseWindows[1].startSeconds)
         assertTrue(report.diagnostics.any { it.code == SignalPlanIssueCode.UNKNOWN_CONNECTION })
     }
 

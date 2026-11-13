@@ -4,7 +4,7 @@ import ru.trafficsignalstudio.model.Intersection
 
 enum class SignalPlanIssueCode {
     NO_SIGNAL_PLAN, PLAN_DISABLED, NO_PHASES, DUPLICATE_PHASE_ID, EMPTY_PHASE,
-    INVALID_GREEN_DURATION, INVALID_YELLOW_DURATION, INVALID_ALL_RED_DURATION,
+    INVALID_GREEN_DURATION, INVALID_FLASHING_GREEN_DURATION, INVALID_YELLOW_DURATION, INVALID_ALL_RED_DURATION,
     UNKNOWN_CONNECTION, CONNECTION_ASSIGNED_MULTIPLE_PHASES, UNASSIGNED_CONNECTION
 }
 
@@ -18,7 +18,7 @@ data class SignalPlanDiagnostic(
 data class SignalPhaseWindow(
     val phaseId: String, val phaseName: String,
     val startSeconds: Int, val greenEndSeconds: Int,
-    val yellowEndSeconds: Int, val allRedEndSeconds: Int
+    val flashingGreenEndSeconds: Int, val yellowEndSeconds: Int, val allRedEndSeconds: Int
 )
 
 data class SignalPlanTimingReport(
@@ -32,6 +32,7 @@ data class SignalPlanTimingReport(
             it.code == SignalPlanIssueCode.DUPLICATE_PHASE_ID ||
             it.code == SignalPlanIssueCode.EMPTY_PHASE ||
             it.code == SignalPlanIssueCode.INVALID_GREEN_DURATION ||
+            it.code == SignalPlanIssueCode.INVALID_FLASHING_GREEN_DURATION ||
             it.code == SignalPlanIssueCode.INVALID_YELLOW_DURATION ||
             it.code == SignalPlanIssueCode.INVALID_ALL_RED_DURATION ||
             it.code == SignalPlanIssueCode.UNKNOWN_CONNECTION ||
@@ -61,6 +62,8 @@ object SignalPlanTimingAnalyzer {
                 SignalPlanIssueCode.EMPTY_PHASE, "Фаза «" + phase.name + "» не содержит разрешённых движений", phaseId = phase.id)
             if (phase.greenSeconds <= 0) diagnostics += SignalPlanDiagnostic(
                 SignalPlanIssueCode.INVALID_GREEN_DURATION, "Зелёный интервал должен быть больше нуля", phaseId = phase.id)
+            if (phase.flashingGreenSeconds < 0) diagnostics += SignalPlanDiagnostic(
+                SignalPlanIssueCode.INVALID_FLASHING_GREEN_DURATION, "Мигающий зелёный интервал не может быть отрицательным", phaseId = phase.id)
             if (phase.yellowSeconds < 0) diagnostics += SignalPlanDiagnostic(
                 SignalPlanIssueCode.INVALID_YELLOW_DURATION, "Жёлтый интервал не может быть отрицательным", phaseId = phase.id)
             if (phase.allRedSeconds < 0) diagnostics += SignalPlanDiagnostic(
@@ -72,9 +75,10 @@ object SignalPlanTimingAnalyzer {
                     phaseId = phase.id, connectionId = id)
             }
             val greenEnd = cursor + phase.greenSeconds.coerceAtLeast(0)
-            val yellowEnd = greenEnd + phase.yellowSeconds.coerceAtLeast(0)
+            val flashingGreenEnd = greenEnd + phase.flashingGreenSeconds.coerceAtLeast(0)
+            val yellowEnd = flashingGreenEnd + phase.yellowSeconds.coerceAtLeast(0)
             val allRedEnd = yellowEnd + phase.allRedSeconds.coerceAtLeast(0)
-            windows += SignalPhaseWindow(phase.id, phase.name, cursor, greenEnd, yellowEnd, allRedEnd)
+            windows += SignalPhaseWindow(phase.id, phase.name, cursor, greenEnd, flashingGreenEnd, yellowEnd, allRedEnd)
             cursor = allRedEnd
         }
         assignments.filterValues { it.size > 1 }.keys.forEach { id ->

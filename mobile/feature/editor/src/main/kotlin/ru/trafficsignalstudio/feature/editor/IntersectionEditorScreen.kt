@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +24,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,6 +46,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import ru.trafficsignalstudio.geometry.IntersectionGeometryEditor
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.MovementKind
@@ -104,6 +108,7 @@ fun IntersectionEditorScreen(
     var targetLaneMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
     var vehicleMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
     var selectedVehicleModelId by remember(intersection?.id) { mutableStateOf(VehicleModelCatalog.defaultPassengerCar.id) }
+    var phaseTimingInputs by remember(intersection?.id) { mutableStateOf(emptyMap<String, String>()) }
     val pendingPoints = remember(intersection?.id) { mutableStateListOf<Point2D>() }
     val safeIndex = selectedApproachIndex.coerceIn(0, max(0, (intersection?.approaches?.size ?: 1) - 1))
     val selectedApproach = intersection?.approaches?.getOrNull(safeIndex)
@@ -495,14 +500,51 @@ fun IntersectionEditorScreen(
                         }
                     }
                     intersection.signalPlan?.phases.orEmpty().forEach { phase ->
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("${phase.name}: зелёный ${phase.greenSeconds} с, жёлтый ${phase.yellowSeconds} с, красный всех ${phase.allRedSeconds} с",
-                                modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                            OutlinedButton(onClick = {
-                                val plan = intersection.signalPlan ?: SignalPlan()
-                                updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.filterNot { it.id == phase.id })))
-                            }) { Text("Удалить") }
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(phase.name, style = MaterialTheme.typography.titleSmall)
+                                OutlinedButton(onClick = {
+                                    val plan = intersection.signalPlan ?: SignalPlan()
+                                    updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.filterNot { it.id == phase.id })))
+                                }) { Text("Удалить фазу") }
+                            }
+                            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(
+                                    Triple("green", "Зелёный, с", phase.greenSeconds),
+                                    Triple("flashing", "Мигающий зелёный, с", phase.flashingGreenSeconds),
+                                    Triple("yellow", "Жёлтый, с", phase.yellowSeconds),
+                                    Triple("allRed", "Красный всех, с", phase.allRedSeconds)
+                                ).forEach { (key, label, currentValue) ->
+                                    val inputKey = phase.id + ":" + key
+                                    OutlinedTextField(
+                                        value = phaseTimingInputs[inputKey] ?: currentValue.toString(),
+                                        onValueChange = { raw ->
+                                            phaseTimingInputs = phaseTimingInputs + (inputKey to raw)
+                                            val parsed = raw.toIntOrNull()
+                                            val minimum = if (key == "green") 1 else 0
+                                            if (parsed != null && parsed >= minimum) {
+                                                val plan = intersection.signalPlan ?: SignalPlan()
+                                                updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map { item ->
+                                                    if (item.id != phase.id) item else when (key) {
+                                                        "green" -> item.copy(greenSeconds = parsed)
+                                                        "flashing" -> item.copy(flashingGreenSeconds = parsed)
+                                                        "yellow" -> item.copy(yellowSeconds = parsed)
+                                                        else -> item.copy(allRedSeconds = parsed)
+                                                    }
+                                                })))
+                                            }
+                                        },
+                                        modifier = Modifier.width(150.dp),
+                                        label = { Text(label) },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                    )
+                                }
+                            }
+                            Text("Полный интервал фазы: ${phase.greenSeconds + phase.flashingGreenSeconds + phase.yellowSeconds + phase.allRedSeconds} с",
+                                style = MaterialTheme.typography.labelSmall)
                         }
                     }
                     timingReport?.let { report ->
@@ -510,7 +552,8 @@ fun IntersectionEditorScreen(
                             style = MaterialTheme.typography.titleSmall)
                         report.phaseWindows.forEach { window ->
                             Text("${window.phaseName}: зелёный ${window.startSeconds}–${window.greenEndSeconds} с; " +
-                                "жёлтый до ${window.yellowEndSeconds} с; общий красный до ${window.allRedEndSeconds} с",
+                                "мигающий зелёный до ${window.flashingGreenEndSeconds} с; жёлтый до ${window.yellowEndSeconds} с; " +
+                                "общий красный до ${window.allRedEndSeconds} с",
                                 style = MaterialTheme.typography.bodySmall)
                         }
                         report.diagnostics.forEach { diagnostic ->

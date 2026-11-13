@@ -249,7 +249,7 @@ object TrafficSimulationEngine {
             if (!timing.isValid || timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) return false
             val cycleTime = atSeconds % timing.cycleLengthSeconds
             return timing.phaseWindows.any { window ->
-                cycleTime >= window.startSeconds && cycleTime < window.greenEndSeconds &&
+                cycleTime >= window.startSeconds && cycleTime < window.flashingGreenEndSeconds &&
                     signalPlan.phases.firstOrNull { it.id == window.phaseId }
                         ?.greenConnectionIds?.contains(connectionId) == true
             }
