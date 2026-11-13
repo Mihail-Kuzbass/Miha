@@ -184,10 +184,6 @@ object TrafficSimulationEngine {
             val pathLength = trajectories[connection.id]?.points?.let(::polylineLength)?.coerceAtLeast(8.0) ?: 20.0
             connection.id to MovementState(connection, pathLength)
         }
-        val laneStates = configured.groupBy { (_, _) ->
-            val connection = configured.first { it.first.id == it.first.id }.first
-            "${connection.fromApproachId}|${connection.fromLaneId}"
-        }
         // Group from the actual source lane; movements sharing it share one physical queue.
         val physicalLanes = configured.groupBy { (connection, _) ->
             "${connection.fromApproachId}|${connection.fromLaneId}"
