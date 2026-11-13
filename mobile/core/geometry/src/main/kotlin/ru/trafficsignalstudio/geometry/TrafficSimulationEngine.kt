@@ -126,6 +126,7 @@ object TrafficSimulationEngine {
     fun run(intersection: Intersection, demand: TrafficSimulationDemand): TrafficSimulationResult {
         val diagnostics = mutableListOf<String>()
         val timing = SignalPlanTimingAnalyzer.analyze(intersection)
+        val signalPlan = intersection.signalPlan
         if (!timing.isValid) diagnostics += timing.diagnostics.map { it.message }
         if (timing.cycleLengthSeconds <= 0 || intersection.signalPlan?.enabled != true) {
             diagnostics += "Нет действующего циклического светофорного плана: выпуск из очередей не выполняется."
@@ -141,7 +142,6 @@ object TrafficSimulationEngine {
             val length = trajectories[item.connectionId]?.points?.let(::polylineLength)?.coerceAtLeast(8.0) ?: 20.0
             item.connectionId to MovementState(item.connectionId, length)
         }
-        val demandsByMovement = configured.associateBy { it.connectionId }
         var nextId = 1L
         val nextArrival = mutableMapOf<Pair<String, VehicleClass?>, Double>()
         configured.forEach { movement ->
@@ -164,11 +164,11 @@ object TrafficSimulationEngine {
         var snapshotAt = 0.0
 
         fun greenFor(connectionId: String, atSeconds: Double): Boolean {
-            if (!timing.isValid || timing.cycleLengthSeconds <= 0 || intersection.signalPlan?.enabled != true) return false
+            if (!timing.isValid || timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) return false
             val cycleTime = atSeconds % timing.cycleLengthSeconds
             val phase = timing.phaseWindows.firstOrNull { window ->
                 cycleTime >= window.startSeconds && cycleTime < window.greenEndSeconds &&
-                    intersection.signalPlan.phases.firstOrNull { it.id == window.phaseId }
+                    signalPlan.phases.firstOrNull { it.id == window.phaseId }
                         ?.greenConnectionIds?.contains(connectionId) == true
             }
             return phase != null
