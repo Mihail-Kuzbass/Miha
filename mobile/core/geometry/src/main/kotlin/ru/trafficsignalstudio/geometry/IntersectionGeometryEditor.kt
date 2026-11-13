@@ -319,8 +319,11 @@ object IntersectionGeometryEditor {
                 classifyMovement(from, to) in source.allowedMovements
         }
         val validIds = validConnections.map { it.id }.toSet()
-        val updatedPlan = intersection.signalPlan?.copy(
-            phases = intersection.signalPlan.phases.map { phase ->
+        // Store the cross-module nullable property in a local value so Kotlin
+        // can safely smart-cast it while building the updated signal plan.
+        val currentPlan: SignalPlan? = intersection.signalPlan
+        val updatedPlan = currentPlan?.copy(
+            phases = currentPlan.phases.map { phase ->
                 phase.copy(greenConnectionIds = phase.greenConnectionIds.intersect(validIds))
             }
         )
