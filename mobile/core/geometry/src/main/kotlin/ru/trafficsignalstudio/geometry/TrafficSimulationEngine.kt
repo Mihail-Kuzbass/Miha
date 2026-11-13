@@ -131,6 +131,15 @@ object TrafficSimulationEngine {
         if (timing.cycleLengthSeconds <= 0 || intersection.signalPlan?.enabled != true) {
             diagnostics += "Нет действующего циклического светофорного плана: выпуск из очередей не выполняется."
         }
+        TrajectoryConflictAnalyzer.analyzeMovementConflicts(intersection).forEach { conflict ->
+            when (conflict.signalStatus) {
+                ConflictSignalStatus.SIMULTANEOUS_GREEN -> diagnostics +=
+                    "Опасный конфликт: движения ${conflict.firstConnectionId} и ${conflict.secondConnectionId} имеют одновременный зелёный."
+                ConflictSignalStatus.PHASES_SEPARATED_NO_CLEARANCE -> diagnostics +=
+                    "Недостаточно защитных интервалов между движениями ${conflict.firstConnectionId} и ${conflict.secondConnectionId}."
+                else -> Unit
+            }
+        }
         val trajectories = TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection)
             .associateBy { it.connectionId }
         val knownConnections = intersection.laneConnections.map { it.id }.toSet()
