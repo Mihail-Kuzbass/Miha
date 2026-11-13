@@ -1201,7 +1201,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawVehicleGlyph(
         VehicleClass.BICYCLE -> Color(0xFF455A64)
     }
     val articulated = model.articulationPointFromFrontMeters
-    val jointDistance = articulated?.let { (it / model.lengthMeters * length).coerceIn(length * 0.25f, length * 0.78f) }
+    val jointDistance = articulated?.let { (it.toFloat() / model.lengthMeters.toFloat() * length).coerceIn(length * 0.25f, length * 0.78f) }
 
     fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBodySection(
         sectionTop: Float,
