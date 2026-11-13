@@ -35,6 +35,10 @@ data class Approach(
  * relative to the intersection centre. A non-zero level represents a
  * grade-separated roadway and is not an at-grade conflict by itself.
  */
+enum class RoadSegmentKind {
+    STRAIGHT, POLYLINE, ARC, BRIDGE, RAMP
+}
+
 data class RoadSegment(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -42,7 +46,8 @@ data class RoadSegment(
     val widthMeters: Double = 7.0,
     val laneCount: Int = 2,
     val elevationLevel: Int = 0,
-    val isRamp: Boolean = false
+    val isRamp: Boolean = false,
+    val kind: RoadSegmentKind = if (isRamp) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE
 )
 
 data class Intersection(
