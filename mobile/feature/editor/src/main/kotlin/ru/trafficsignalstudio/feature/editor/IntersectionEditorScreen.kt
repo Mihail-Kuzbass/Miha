@@ -436,7 +436,7 @@ fun IntersectionEditorScreen(
                         }
                     }
                     if (movementConflicts.isNotEmpty()) {
-                        Divider()
+                        Text("—", color = MaterialTheme.colorScheme.outline)
                         Text("Оценка конфликтов с учётом фаз", style = MaterialTheme.typography.titleSmall)
                         movementConflicts.take(10).forEach { conflict ->
                             val status = when (conflict.signalStatus) {
