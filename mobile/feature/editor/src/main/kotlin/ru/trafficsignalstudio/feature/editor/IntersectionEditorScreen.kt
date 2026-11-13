@@ -92,7 +92,9 @@ fun IntersectionEditorScreen(
     val safeIndex = selectedApproachIndex.coerceIn(0, max(0, (intersection?.approaches?.size ?: 1) - 1))
     val selectedApproach = intersection?.approaches?.getOrNull(safeIndex)
     val validationErrors = intersection?.let(IntersectionGeometryEditor::validate).orEmpty()
-    val trajectoryConflicts = intersection?.let(TrajectoryConflictAnalyzer::analyze).orEmpty()
+    val trajectoryConflicts = remember(intersection?.id, intersection?.roadSegments) {
+        intersection?.let(TrajectoryConflictAnalyzer::analyze).orEmpty()
+    }
 
     fun updateIntersection(updated: Intersection) {
         onProjectChange(
