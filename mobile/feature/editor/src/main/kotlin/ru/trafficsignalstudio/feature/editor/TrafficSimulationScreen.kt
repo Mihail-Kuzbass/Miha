@@ -330,10 +330,10 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                             ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> Color(0xFFE53935)
                         })
                     Text(when (simulation.crashRiskBand) {
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH -> "0–5%: ДТП не происходит"
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> "5–20%: столкновение из-за несоблюдения дистанции"
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> "20–50%: столкновение 2–3 автомобилей в конфликтной зоне"
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> "50% и выше: групповое столкновение или до 2 ДТП за час симуляции"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH -> "0–<5%: ДТП не происходит"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> "5–<20%: столкновение из-за несоблюдения дистанции"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> "20–<50%: столкновение 2–3 автомобилей в конфликтной зоне"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> "≥50%: групповое столкновение или до 2 ДТП за час симуляции"
                     }, style = MaterialTheme.typography.bodySmall)
                     MetricLine("Геометрических конфликтов", "${simulation.geometricConflictCount}")
                     MetricLine("Смоделировано ДТП", "${simulation.crashIncidents.size}")

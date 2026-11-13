@@ -25,12 +25,12 @@ class CrashRiskAnalyzerTest {
         )
     }
 
-    @Test fun lowFlowWithoutGeometricConflictsStaysInFollowingDistanceBand() {
+    @Test fun lowFlowWithoutGeometricConflictsStaysInNoCrashBand() {
         val assessment = CrashRiskAnalyzer.assess(simpleIntersection(), TrafficSimulationDemand(
             movements = listOf(MovementTrafficDemand("m1", 600.0))
         ))
-        assertEquals(CrashRiskBand.FOLLOWING_DISTANCE, assessment.band)
-        assertTrue(assessment.riskPercent in 0.0..9.9)
+        assertEquals(CrashRiskBand.NO_CRASH, assessment.band)
+        assertTrue(assessment.riskPercent in 0.0..<5.0)
     }
 
     @Test fun riskBandsUseRequestedInclusiveThresholds() {
