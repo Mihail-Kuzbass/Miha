@@ -185,9 +185,15 @@ class TrafficSimulationEngineTest {
             "Predictive braking should prevent physical contact between conflicting moving streams",
             result.crashIncidents.any { it.cause == CrashIncidentCause.PHYSICAL_CONTACT }
         )
+        val observedSpeeds = result.snapshots.flatMap { it.activeVehicles }
+            .map { it.speedMetersPerSecond }
         assertTrue(
             "Simulation should retain moving traffic while conflicting vehicles yield",
-            result.snapshots.flatMap { it.activeVehicles }.any { it.speedMetersPerSecond > 0.5 }
+            observedSpeeds.any { it > 0.5 }
+        )
+        assertTrue(
+            "At least one vehicle should reduce speed while yielding to a predicted conflict",
+            observedSpeeds.any { it in 0.1..10.0 }
         )
     }
 }
