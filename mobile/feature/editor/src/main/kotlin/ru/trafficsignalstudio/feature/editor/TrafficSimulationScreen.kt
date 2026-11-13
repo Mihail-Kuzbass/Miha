@@ -31,6 +31,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
@@ -117,6 +119,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
     var selectedSnapshotIndex by remember(intersection.id) { mutableStateOf(0) }
     var isPlaying by remember(intersection.id) { mutableStateOf(false) }
     var zoomScale by remember(intersection.id) { mutableStateOf(1f) }
+    var panOffset by remember(intersection.id) { mutableStateOf(Offset.Zero) }
     var inputError by remember(intersection.id) { mutableStateOf<String?>(null) }
     val timingReport = remember(intersection.id, intersection.signalPlan, intersection.laneConnections) {
         SignalPlanTimingAnalyzer.analyze(intersection)
@@ -297,14 +300,20 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
             )
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TrafficSimulationCanvas(intersection, simulation.snapshots.getOrNull(selectedSnapshotIndex), zoomScale)
+                    TrafficSimulationCanvas(
+                        intersection,
+                        simulation.snapshots.getOrNull(selectedSnapshotIndex),
+                        zoomScale,
+                        panOffset,
+                        onPan = { dragAmount -> panOffset += dragAmount }
+                    )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { zoomScale = (zoomScale / 1.25f).coerceAtLeast(0.5f) }) { Text("−") }
                         Text("${(zoomScale * 100).toInt()}%", modifier = Modifier.alignByBaseline())
                         OutlinedButton(onClick = { zoomScale = (zoomScale * 1.25f).coerceAtMost(4f) }) { Text("+") }
-                        OutlinedButton(onClick = { zoomScale = 1f }) { Text("Сброс") }
+                        OutlinedButton(onClick = { zoomScale = 1f; panOffset = Offset.Zero }) { Text("Сброс вида") }
                     }
-                    Text("Линейка 10 м · масштаб ${"%.0f".format(zoomScale * 100)}%", style = MaterialTheme.typography.labelSmall)
+                    Text("Линейка 10 м · масштаб ${"%.0f".format(zoomScale * 100)}% · перемещение: перетащите схему пальцем", style = MaterialTheme.typography.labelSmall)
                     Text("Модельное время: ${simulation.snapshots.getOrNull(selectedSnapshotIndex)?.timeSeconds?.toInt() ?: 0} с")
                     Slider(
                         value = selectedSnapshotIndex.toFloat(),
@@ -443,11 +452,26 @@ private fun MetricLine(label: String, value: String) {
 }
 
 @Composable
-private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: TrafficSimulationSnapshot?, zoomScale: Float) {
+private fun TrafficSimulationCanvas(
+    intersection: Intersection,
+    snapshot: TrafficSimulationSnapshot?,
+    zoomScale: Float,
+    panOffset: Offset,
+    onPan: (Offset) -> Unit
+) {
     val trajectories = remember(intersection.id, intersection.laneConnections) {
         TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection)
     }
-    Canvas(modifier = Modifier.fillMaxWidth().height(280.dp).background(Color(0xFF263238))) {
+    Canvas(
+        modifier = Modifier.fillMaxWidth().height(280.dp)
+            .background(Color(0xFF263238))
+            .pointerInput(intersection.id) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onPan(dragAmount)
+                }
+            }
+    ) {
         val trajectoryById = trajectories.associateBy { it.connectionId }
         val storageLength = snapshot?.approachStorageLengthMeters ?: 120.0
         val approachExtensions = trajectories.mapNotNull { trajectory ->
@@ -459,29 +483,22 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
                 first.yMeters + (first.yMeters - second.yMeters) * storageLength / segmentLength
             )
         }
-        val vehiclePoints = snapshot?.activeVehicles.orEmpty().mapNotNull { vehicle ->
-            trajectoryById[vehicle.connectionId]?.let { target ->
-                val targetPoint = pointAtProgress(target.points, vehicle.progress)
-                val source = vehicle.laneChangeFromConnectionId?.let(trajectoryById::get)
-                if (source == null) targetPoint else {
-                    val sourcePoint = pointAtProgress(source.points, vehicle.progress)
-                    val blend = vehicle.laneChangeProgress.coerceIn(0.0, 1.0)
-                    ru.trafficsignalstudio.model.Point2D(
-                        sourcePoint.xMeters + (targetPoint.xMeters - sourcePoint.xMeters) * blend,
-                        sourcePoint.yMeters + (targetPoint.yMeters - sourcePoint.yMeters) * blend
-                    )
-                }
-            }
-        }
-        val allPoints = trajectories.flatMap { it.points } + approachExtensions + vehiclePoints
+        // Keep the viewport anchored to fixed intersection geometry; moving vehicles must not shift the origin.
+        val intersectionPoints = trajectories.flatMap { it.points }
+        val allPoints = intersectionPoints + approachExtensions
         if (allPoints.isEmpty()) return@Canvas
         val minX = allPoints.minOf { it.xMeters }; val maxX = allPoints.maxOf { it.xMeters }
         val minY = allPoints.minOf { it.yMeters }; val maxY = allPoints.maxOf { it.yMeters }
         val spanX = (maxX - minX).coerceAtLeast(10.0)
         val spanY = (maxY - minY).coerceAtLeast(10.0)
         val scale = minOf(size.width / spanX.toFloat(), size.height / spanY.toFloat()) * 0.78f * zoomScale.coerceIn(0.5f, 4f)
-        val origin = Offset(size.width / 2f - ((minX + maxX) / 2.0).toFloat() * scale,
-            size.height / 2f + ((minY + maxY) / 2.0).toFloat() * scale)
+        // Zoom is centered on the intersection geometry, while panOffset moves the complete scene.
+        val centerX = ((intersectionPoints.minOf { it.xMeters } + intersectionPoints.maxOf { it.xMeters }) / 2.0).toFloat()
+        val centerY = ((intersectionPoints.minOf { it.yMeters } + intersectionPoints.maxOf { it.yMeters }) / 2.0).toFloat()
+        val origin = Offset(
+            size.width / 2f - centerX * scale + panOffset.x,
+            size.height / 2f + centerY * scale + panOffset.y
+        )
         fun map(point: ru.trafficsignalstudio.model.Point2D) =
             Offset(origin.x + point.xMeters.toFloat() * scale, origin.y - point.yMeters.toFloat() * scale)
         trajectories.forEach { trajectory ->
