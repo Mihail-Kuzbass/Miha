@@ -110,7 +110,11 @@ data class TrafficSimulationResult(
     val diagnostics: List<String>,
     val maximumQueueLengthMeters: Double,
     val spillbackVehiclesAtEnd: Int,
-    val maximumSpillbackVehicles: Int
+    val maximumSpillbackVehicles: Int,
+    val physicalLaneVehiclesAtEnd: Int,
+    val upstreamQueueAtEnd: Int,
+    val laneStorageUtilizationPercent: Double,
+    val maximumLaneStorageUtilizationPercent: Double
 ) {
     val throughputVehiclesPerHour: Double
         get() = totalDepartures * 3600.0 / durationSeconds.coerceAtLeast(1)
@@ -491,6 +495,10 @@ object TrafficSimulationEngine {
         val totalDelaySeconds = movementMetrics.sumOf { it.averageDelaySeconds * it.arrivals }
         val finalQueue = movementMetrics.sumOf { it.queueVehiclesAtEnd }
         val finalSpillback = movementMetrics.sumOf { it.spillbackVehiclesAtEnd }
+        val physicalLaneVehicles = states.values.sumOf { state -> state.vehicles.count { it.positionMeters <= 0.0 } }
+        val finalLaneQueueLength = laneGroups.values.maxOfOrNull { group ->
+            approachQueueLength(group.flatMap { it.vehicles })
+        } ?: 0.0
         return TrafficSimulationResult(
             durationSeconds = demand.durationSeconds,
             cycleLengthSeconds = timing.cycleLengthSeconds,
@@ -506,7 +514,11 @@ object TrafficSimulationEngine {
             diagnostics = diagnostics.distinct(),
             maximumQueueLengthMeters = maximumQueueLengthMeters,
             spillbackVehiclesAtEnd = finalSpillback,
-            maximumSpillbackVehicles = maximumSpillbackVehicles
+            maximumSpillbackVehicles = maximumSpillbackVehicles,
+            physicalLaneVehiclesAtEnd = physicalLaneVehicles,
+            upstreamQueueAtEnd = finalSpillback,
+            laneStorageUtilizationPercent = (finalLaneQueueLength / demand.approachStorageLengthMeters * 100.0).coerceIn(0.0, 100.0),
+            maximumLaneStorageUtilizationPercent = (maximumQueueLengthMeters / demand.approachStorageLengthMeters * 100.0).coerceIn(0.0, 100.0)
         )
     }
 
