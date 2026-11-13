@@ -263,7 +263,7 @@ fun IntersectionEditorScreen(
         if (intersection != null && selectedApproach != null) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
-                    modifier = Modifier.padding(10.dp).verticalScroll(rememberScrollState()),
+                    modifier = Modifier.padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text("Дорожные подходы", style = MaterialTheme.typography.titleMedium)
