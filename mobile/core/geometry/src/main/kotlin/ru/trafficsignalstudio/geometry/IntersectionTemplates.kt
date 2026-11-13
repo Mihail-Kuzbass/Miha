@@ -34,12 +34,6 @@ object IntersectionTemplates {
      * are intentionally handled by later engineering milestones.
      */
     fun diamondInterchange(name: String = "Ромбовидная транспортная развязка"): Intersection {
-        val approaches = listOf(
-            approach("Северный съезд", 0.0, 1),
-            approach("Восточный съезд", 90.0, 1),
-            approach("Южный съезд", 180.0, 1),
-            approach("Западный съезд", 270.0, 1)
-        )
         val segments = listOf(
             RoadSegment(name = "Основной ход — верхний уровень",
                 centerline = listOf(Point2D(-75.0, 0.0), Point2D(75.0, 0.0)),
@@ -61,7 +55,7 @@ object IntersectionTemplates {
                 widthMeters = 7.0, laneCount = 2, elevationLevel = 1, isRamp = true)
         )
         return Intersection(name = name, type = IntersectionType.DIAMOND_INTERCHANGE,
-            approaches = approaches, roadSegments = segments)
+            approaches = emptyList(), roadSegments = segments)
     }
 
     fun cloverleafInterchange(name: String = "Клеверная транспортная развязка"): Intersection {
