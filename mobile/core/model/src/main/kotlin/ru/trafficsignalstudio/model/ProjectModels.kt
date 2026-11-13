@@ -64,6 +64,14 @@ data class RoadJunctionNode(
     val connectedSegmentIds: Set<String> = emptySet()
 )
 
+data class LaneConnection(
+    val id: String = UUID.randomUUID().toString(),
+    val fromApproachId: String,
+    val fromLaneId: String,
+    val toApproachId: String,
+    val toLaneId: String
+)
+
 data class SafetyIsland(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "Островок безопасности",
@@ -79,7 +87,8 @@ data class Intersection(
     val approaches: List<Approach>,
     val roadSegments: List<RoadSegment> = emptyList(),
     val junctionNodes: List<RoadJunctionNode> = emptyList(),
-    val safetyIslands: List<SafetyIsland> = emptyList()
+    val safetyIslands: List<SafetyIsland> = emptyList(),
+    val laneConnections: List<LaneConnection> = emptyList()
 )
 
 data class RoadNetwork(
@@ -95,7 +104,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 3
+        const val CURRENT_SCHEMA_VERSION = 4
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
