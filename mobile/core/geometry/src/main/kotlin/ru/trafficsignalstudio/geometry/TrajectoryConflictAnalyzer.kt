@@ -25,6 +25,8 @@ enum class ConflictSignalStatus {
     SIMULTANEOUS_GREEN,
     /** The movements belong to different sequential phases with clearance intervals. */
     SEPARATED_BY_PHASE,
+    /** Different phases, but the transition has no complete yellow + all-red clearance. */
+    PHASES_SEPARATED_NO_CLEARANCE,
     /** One or both movements have no phase assignment. */
     UNASSIGNED,
     /** No usable signal plan is configured; temporal safety cannot be assessed. */
@@ -135,8 +137,8 @@ object TrajectoryConflictAnalyzer {
     fun analyzeMovementConflicts(intersection: Intersection): List<MovementTrajectoryConflict> {
         val trajectories = buildMovementTrajectories(intersection)
         val plan = intersection.signalPlan?.takeIf { it.enabled && it.phases.isNotEmpty() }
-        val phaseAssignments = plan?.phases.orEmpty().flatMap { phase ->
-            phase.greenConnectionIds.map { it to phase }
+        val phaseAssignments = plan?.phases.orEmpty().flatMapIndexed { phaseIndex, phase ->
+            phase.greenConnectionIds.map { it to (phaseIndex to phase) }
         }.groupBy({ it.first }, { it.second })
         val results = mutableListOf<MovementTrajectoryConflict>()
         for (i in trajectories.indices) for (j in i + 1 until trajectories.size) {
@@ -149,15 +151,21 @@ object TrajectoryConflictAnalyzer {
                     plan == null -> ConflictSignalStatus.NO_SIGNAL_PLAN
                     firstPhases.size != 1 || secondPhases.size != 1 ->
                         ConflictSignalStatus.UNASSIGNED
-                    firstPhases.single().id == secondPhases.single().id ->
+                    firstPhases.single().second.id == secondPhases.single().second.id ->
                         ConflictSignalStatus.SIMULTANEOUS_GREEN
-                    else -> ConflictSignalStatus.SEPARATED_BY_PHASE
+                    else -> {
+                        val earlier = if (firstPhases.single().first < secondPhases.single().first)
+                            firstPhases.single().second else secondPhases.single().second
+                        if (earlier.yellowSeconds > 0 && earlier.allRedSeconds > 0)
+                            ConflictSignalStatus.SEPARATED_BY_PHASE
+                        else ConflictSignalStatus.PHASES_SEPARATED_NO_CLEARANCE
+                    }
                 }
                 val conflict = MovementTrajectoryConflict(
                     first.connectionId, second.connectionId,
                     first.movementKind, second.movementKind,
                     hit.point, hit.kind(), status,
-                    firstPhases.singleOrNull()?.name, secondPhases.singleOrNull()?.name
+                    firstPhases.singleOrNull()?.second?.name, secondPhases.singleOrNull()?.second?.name
                 )
                 if (results.none { existing ->
                     existing.firstConnectionId == conflict.firstConnectionId &&
