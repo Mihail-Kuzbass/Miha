@@ -69,6 +69,8 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
         mutableStateOf(intersection.laneConnections.associate { it.id to MovementDemandForm("600", defaultCategories) })
     }
     var durationMinutes by remember(intersection.id) { mutableStateOf(15) }
+    var approachStorageLength by remember(intersection.id) { mutableStateOf("120") }
+    var approachSpeed by remember(intersection.id) { mutableStateOf("30") }
     var result by remember(intersection.id) { mutableStateOf<TrafficSimulationResult?>(null) }
     var selectedSnapshotIndex by remember(intersection.id) { mutableStateOf(0) }
     var isPlaying by remember(intersection.id) { mutableStateOf(false) }
@@ -168,6 +170,25 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 }
             }
         }
+        Text("Параметры физического подхода", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = approachStorageLength,
+                onValueChange = { approachStorageLength = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }; result = null },
+                label = { Text("Длина подхода, м") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = approachSpeed,
+                onValueChange = { approachSpeed = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }; result = null },
+                label = { Text("Скорость входа, км/ч") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+        }
+        Text("Длина подхода задаёт конечную вместимость полосы до стоп-линии. Если свободного места нет, прибывающие ТС учитываются как подпор за пределами моделируемого участка.",
+            style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(5, 10, 15, 30).forEach { minutes ->
                 if (durationMinutes == minutes) Button(onClick = { durationMinutes = minutes }) { Text("${minutes} мин") }
@@ -189,8 +210,15 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                         )
                     }
                     inputError = null
+                    val storageMeters = approachStorageLength.replace(',', '.').toDoubleOrNull()
+                        ?: throw IllegalArgumentException("Укажите корректную длину подхода")
+                    val entrySpeedKmh = approachSpeed.replace(',', '.').toDoubleOrNull()
+                        ?: throw IllegalArgumentException("Укажите корректную скорость входа")
                     result = TrafficSimulationEngine.run(intersection, TrafficSimulationDemand(
-                        movements = demands, durationSeconds = durationMinutes * 60
+                        movements = demands,
+                        durationSeconds = durationMinutes * 60,
+                        approachStorageLengthMeters = storageMeters,
+                        approachSpeedKmh = entrySpeedKmh
                     ))
                     selectedSnapshotIndex = 0
                     isPlaying = false
@@ -262,7 +290,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 }
             }
             simulation.diagnostics.forEach { Text("Предупреждение: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Text("Расчётная модель использует дискретный шаг, равномерный поток прибытий и фазовый выпуск с упрощённым интервалом обслуживания. Результаты предварительные: пока нет калибровки по фактическим наблюдениям, полноценного следования за лидером, пешеходов и адаптивного поведения водителей.",
+            Text("Движение рассчитывается по IDM: длина кузова, безопасный зазор, временной интервал, ускорение и замедление каждого класса ТС. Подход имеет конечную вместимость; неразместившийся поток учитывается отдельно. Модель пока не включает перестроения, пешеходов, блокирование выходных полос и калибровку по натурным наблюдениям.",
                 style = MaterialTheme.typography.labelSmall)
         }
     }
