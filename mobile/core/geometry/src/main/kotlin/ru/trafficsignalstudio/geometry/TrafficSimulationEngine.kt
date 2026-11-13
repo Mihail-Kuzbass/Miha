@@ -459,12 +459,13 @@ object TrafficSimulationEngine {
                         .filter { it.positionMeters <= 0.0 }
                         .minOfOrNull { it.positionMeters - it.waiting.model.lengthMeters }
                         ?: -demand.approachStorageLengthMeters
-                    var nextFront = tailRear - demand.minimumGapMeters
+                    var nextRear = tailRear
                     val pending = group.flatMap { state ->
                         state.pending.map { waiting -> state to waiting }
                     }.sortedBy { it.second.arrivalTime }
                     pending.forEachIndexed { index, (state, waiting) ->
-                        val centerPosition = nextFront - waiting.model.lengthMeters / 2.0
+                        val frontPosition = nextRear - waiting.model.minimumGapMeters
+                        val centerPosition = frontPosition - waiting.model.lengthMeters / 2.0
                         visible += SimulatedVehicle(
                             id = waiting.id,
                             connectionId = state.connectionId,
@@ -472,12 +473,12 @@ object TrafficSimulationEngine {
                             progress = centerPosition / state.pathLengthMeters,
                             queued = true,
                             queueIndex = index,
-                            positionMeters = nextFront,
+                            positionMeters = frontPosition,
                             speedMetersPerSecond = 0.0,
                             lengthMeters = waiting.model.lengthMeters,
                             widthMeters = waiting.model.widthMeters
                         )
-                        nextFront -= waiting.model.lengthMeters + waiting.model.minimumGapMeters
+                        nextRear = frontPosition - waiting.model.lengthMeters
                     }
                 }
 
