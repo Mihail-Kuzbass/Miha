@@ -140,6 +140,52 @@ class IntersectionGeometryEditorTest {
         ))
     }
 
+    @Test
+    fun freeformRoadLanesCanBeResizedAndConfiguredIndependently() {
+        val road = ru.trafficsignalstudio.model.RoadSegment(
+            name = "Свободная дорога",
+            centerline = listOf(ru.trafficsignalstudio.model.Point2D(0.0, 0.0), ru.trafficsignalstudio.model.Point2D(20.0, 0.0)),
+            widthMeters = 7.0,
+            laneCount = 2
+        )
+        val intersection = ru.trafficsignalstudio.model.Intersection(
+            name = "Тест",
+            type = ru.trafficsignalstudio.model.IntersectionType.CUSTOM,
+            approaches = emptyList(),
+            roadSegments = listOf(road)
+        )
+        val expanded = IntersectionGeometryEditor.setRoadLaneCount(intersection, road.id, 3)
+        val lanes = expanded.roadSegments.single().lanes
+        assertEquals(3, lanes.size)
+        assertEquals(10.5, expanded.roadSegments.single().widthMeters, 0.0001)
+
+        val configured = IntersectionGeometryEditor.setRoadLaneDirection(
+            expanded, road.id, lanes[1].id, ru.trafficsignalstudio.model.LaneTravelDirection.AGAINST_CENTERLINE
+        )
+        val configuredLane = configured.roadSegments.single().lanes[1]
+        assertEquals(ru.trafficsignalstudio.model.LaneTravelDirection.AGAINST_CENTERLINE, configuredLane.travelDirection)
+
+        val narrowed = IntersectionGeometryEditor.changeRoadLaneWidth(
+            configured, road.id, configuredLane.id, -0.25
+        )
+        assertEquals(10.25, narrowed.roadSegments.single().widthMeters, 0.0001)
+        assertEquals(3, narrowed.roadSegments.single().laneCount)
+    }
+
+    @Test
+    fun legacyRoadSegmentsReceiveStableSynthesizedLaneIds() {
+        val road = ru.trafficsignalstudio.model.RoadSegment(
+            name = "Legacy",
+            centerline = listOf(ru.trafficsignalstudio.model.Point2D(0.0, 0.0), ru.trafficsignalstudio.model.Point2D(10.0, 0.0)),
+            widthMeters = 7.0,
+            laneCount = 2
+        )
+        val first = IntersectionGeometryEditor.effectiveRoadLanes(road)
+        val second = IntersectionGeometryEditor.effectiveRoadLanes(road)
+        assertEquals(first.map { it.id }, second.map { it.id })
+        assertEquals(listOf(3.5, 3.5), first.map { it.widthMeters })
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun laneCountOutsideSupportedRangeIsRejected() {
         val intersection = IntersectionTemplates.fourLeg()
