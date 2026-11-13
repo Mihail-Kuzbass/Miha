@@ -12,6 +12,7 @@ import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.RoadNetwork
 import ru.trafficsignalstudio.model.RoadSegment
+import ru.trafficsignalstudio.model.RoadSegmentKind
 import java.io.File
 
 class ProjectJsonStore(context: Context) {
@@ -78,6 +79,7 @@ class ProjectJsonStore(context: Context) {
                                     put("laneCount", segment.laneCount)
                                     put("elevationLevel", segment.elevationLevel)
                                     put("isRamp", segment.isRamp)
+                                    put("kind", segment.kind.name)
                                     put("centerline", JSONArray().apply {
                                         segment.centerline.forEach { point ->
                                             put(JSONObject().put("x", point.xMeters).put("y", point.yMeters))
@@ -139,7 +141,9 @@ class ProjectJsonStore(context: Context) {
                     widthMeters = segmentJson.optDouble("widthMeters", 7.0),
                     laneCount = segmentJson.optInt("laneCount", 2),
                     elevationLevel = segmentJson.optInt("elevationLevel", 0),
-                    isRamp = segmentJson.optBoolean("isRamp", false)
+                    isRamp = segmentJson.optBoolean("isRamp", false),
+                    kind = runCatching { RoadSegmentKind.valueOf(segmentJson.optString("kind")) }
+                        .getOrDefault(if (segmentJson.optBoolean("isRamp", false)) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE)
                 )
             }
             Intersection(
