@@ -8,6 +8,8 @@ import ru.trafficsignalstudio.model.LaneFlowDirection
 import ru.trafficsignalstudio.model.LaneTravelDirection
 import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.Point2D
+import ru.trafficsignalstudio.model.VehicleModel
+import ru.trafficsignalstudio.model.VehicleModelCatalog
 import ru.trafficsignalstudio.model.RoadSegment
 import kotlin.math.abs
 import kotlin.math.cos
@@ -52,7 +54,8 @@ data class MovementTrajectory(
     val toLaneId: String,
     val movementKind: MovementKind,
     val points: List<Point2D>,
-    val vehicleWidthMeters: Double = VehicleEnvelopeConflictAnalyzer.DEFAULT_VEHICLE_WIDTH_METERS
+    val vehicleWidthMeters: Double = VehicleEnvelopeConflictAnalyzer.DEFAULT_VEHICLE_WIDTH_METERS,
+    val vehicleModelId: String = VehicleModelCatalog.defaultPassengerCar.id
 )
 
 data class MovementTrajectoryConflict(
@@ -115,7 +118,10 @@ object TrajectoryConflictAnalyzer {
     }
 
     /** Build smooth, lane-specific Bézier paths for every configured lane connection. */
-    fun buildMovementTrajectories(intersection: Intersection): List<MovementTrajectory> =
+    fun buildMovementTrajectories(
+        intersection: Intersection,
+        vehicleModel: VehicleModel = VehicleModelCatalog.defaultPassengerCar
+    ): List<MovementTrajectory> =
         intersection.laneConnections.mapNotNull { connection ->
             val fromApproach = intersection.approaches.firstOrNull { it.id == connection.fromApproachId } ?: return@mapNotNull null
             val toApproach = intersection.approaches.firstOrNull { it.id == connection.toApproachId } ?: return@mapNotNull null
@@ -126,7 +132,9 @@ object TrajectoryConflictAnalyzer {
             MovementTrajectory(
                 connection.id, fromApproach.id, fromLane.id, toApproach.id, toLane.id,
                 classifyMovement(fromApproach, toApproach),
-                buildConnectionCurve(fromApproach, fromLane, toApproach, toLane)
+                buildConnectionCurve(fromApproach, fromLane, toApproach, toLane),
+                vehicleWidthMeters = vehicleModel.widthMeters,
+                vehicleModelId = vehicleModel.id
             )
         }
 
