@@ -252,15 +252,17 @@ class IntersectionGeometryEditorTest {
             approaches = emptyList(),
             roadSegments = listOf(road)
         )
-        val firstLane = IntersectionGeometryEditor.effectiveRoadLanes(road).first()
+        val originalLanes = IntersectionGeometryEditor.effectiveRoadLanes(road)
+        val lastLane = originalLanes.last()
         val configured = IntersectionGeometryEditor.setRoadLaneMovements(
-            intersection, road.id, firstLane.id,
+            intersection, road.id, lastLane.id,
             setOf(MovementKind.LEFT, MovementKind.U_TURN)
         )
         val expanded = IntersectionGeometryEditor.setRoadLaneCount(configured, road.id, 3)
         val lanes = expanded.roadSegments.single().lanes
 
-        assertEquals(setOf(MovementKind.LEFT, MovementKind.U_TURN), lanes.first().allowedMovements)
+        assertEquals(setOf(MovementKind.THROUGH), lanes.first().allowedMovements)
+        assertEquals(setOf(MovementKind.LEFT, MovementKind.U_TURN), lanes[1].allowedMovements)
         assertEquals(setOf(MovementKind.LEFT, MovementKind.U_TURN), lanes.last().allowedMovements)
         assertEquals(ru.trafficsignalstudio.model.LaneTravelDirection.ALONG_CENTERLINE,
             lanes.first().travelDirection)
