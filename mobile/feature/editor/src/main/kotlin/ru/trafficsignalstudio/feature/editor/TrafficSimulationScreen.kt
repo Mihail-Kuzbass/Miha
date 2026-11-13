@@ -347,11 +347,13 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                     MetricLine("Геометрических конфликтов", "${simulation.geometricConflictCount}")
                     MetricLine("Смоделировано ДТП", "${simulation.crashIncidents.size}")
                     if (simulation.crashRiskBand == ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH) {
-                        Text("При текущем уровне риска аварийные события отключены.", style = MaterialTheme.typography.labelSmall)
+                        Text("Сценарные ДТП по уровню риска отключены; фактическое соприкосновение габаритов автомобилей всё равно регистрируется как ДТП.", style = MaterialTheme.typography.labelSmall)
                     }
                     MetricLine("Участников ДТП", "${simulation.crashIncidents.sumOf { it.participants }}")
                     simulation.crashIncidents.forEach { incident ->
-                        MetricLine("ДТП ${incident.id}", "${incident.participants} ТС · ${incident.timeSeconds.toInt()} с · устранение через ${(incident.clearedAtSeconds - incident.timeSeconds).toInt()} с")
+                        val causeLabel = if (incident.cause == ru.trafficsignalstudio.geometry.CrashIncidentCause.PHYSICAL_CONTACT)
+                            "Физическое соприкосновение" else "Сценарное событие"
+                        MetricLine("ДТП ${incident.id}", "${causeLabel} · ${incident.participants} ТС · ${incident.timeSeconds.toInt()} с · устранение через ${(incident.clearedAtSeconds - incident.timeSeconds).toInt()} с")
                     }
                     Text("Процент — сценарный индикатор риска по интенсивности и конфликтам траекторий, а не статистически откалиброванная вероятность для реальной улицы. При риске ниже 5% ДТП отключены; при риске от 50% моделируется до двух аварийных событий за каждый час.", style = MaterialTheme.typography.labelSmall)
                 }

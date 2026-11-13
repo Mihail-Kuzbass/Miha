@@ -714,12 +714,13 @@ object TrafficSimulationEngine {
                     val sourceLane = approachLanes[sourceState.fromApproachId]?.get(sourceState.fromLaneId)
                         ?: return@stateLoop
                     sourceState.vehicles.forEach vehicleLoop@{ vehicle ->
-                        if (vehicle.crashedUntilSeconds != null || vehicle.positionMeters > 0.0) return@vehicleLoop
+                        if (vehicle.crashedUntilSeconds != null) return@vehicleLoop
+                        val alreadyPassing = vehicle.passingOffsetMeters > 0.25
+                        if (vehicle.positionMeters > 0.0 && !alreadyPassing) return@vehicleLoop
                         val obstacle = laneAgents.filter {
                             it !== vehicle && it.crashedUntilSeconds?.let { until -> time < until } == true &&
                                 it.positionMeters > vehicle.positionMeters
                         }.minByOrNull { it.positionMeters }
-                        val alreadyPassing = vehicle.passingOffsetMeters > 0.25
                         val clearOfObstacle = obstacle == null ||
                             vehicle.positionMeters > obstacle.positionMeters + vehicle.waiting.model.lengthMeters + 5.0
                         val desiredOffset = when {
