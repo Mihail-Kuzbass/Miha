@@ -37,5 +37,6 @@ class IntersectionTemplatesTest {
         assertTrue(diamond.roadSegments.any { it.elevationLevel > 0 })
         assertTrue(diamond.roadSegments.any { it.isRamp })
         assertTrue(cloverleaf.roadSegments.size > diamond.roadSegments.size)
+        assertTrue(IntersectionGeometryEditor.validate(diamond).isEmpty())
     }
 }
