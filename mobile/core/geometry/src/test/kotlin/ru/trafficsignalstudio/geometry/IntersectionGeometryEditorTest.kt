@@ -184,6 +184,8 @@ class IntersectionGeometryEditorTest {
         val second = IntersectionGeometryEditor.effectiveRoadLanes(road)
         assertEquals(first.map { it.id }, second.map { it.id })
         assertEquals(listOf(3.5, 3.5), first.map { it.widthMeters })
+        assertEquals(ru.trafficsignalstudio.model.LaneTravelDirection.ALONG_CENTERLINE, first[0].travelDirection)
+        assertEquals(ru.trafficsignalstudio.model.LaneTravelDirection.AGAINST_CENTERLINE, first[1].travelDirection)
     }
 
     @Test(expected = IllegalArgumentException::class)
