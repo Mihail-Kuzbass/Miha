@@ -221,7 +221,7 @@ private fun IntersectionGeometryPreview(
         val eastWest = intersection.approaches - northSouth.toSet()
         val nsMeters = northSouth.maxOfOrNull { approach -> approach.lanes.sumOf { it.widthMeters } } ?: 7.0
         val ewMeters = eastWest.maxOfOrNull { approach -> approach.lanes.sumOf { it.widthMeters } } ?: 7.0
-        val scale = size.minDimension * 0.34f / max(nsMeters, ewMeters, 1.0).toFloat()
+        val scale = size.minDimension * 0.34f / maxOf(nsMeters, ewMeters, 1.0).toFloat()
         val verticalWidth = (nsMeters * scale).coerceAtLeast(24f)
         val horizontalWidth = (ewMeters * scale).coerceAtLeast(24f)
         val verticalHalf = verticalWidth / 2f
