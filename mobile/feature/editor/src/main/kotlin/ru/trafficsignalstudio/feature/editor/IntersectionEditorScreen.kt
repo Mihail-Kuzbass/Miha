@@ -90,6 +90,7 @@ fun IntersectionEditorScreen(
     onSave: () -> Unit,
     onProjectChange: (ProjectDocument) -> Unit,
     onSelectIntersection: (String) -> Unit,
+    allowAddIntersection: Boolean,
     onAddIntersection: () -> Unit
 ) {
     var showSimulation by remember(intersection?.id) { mutableStateOf(false) }
@@ -176,7 +177,7 @@ fun IntersectionEditorScreen(
                         }
                     }
                 }
-                if (project.network.intersections.isNotEmpty()) OutlinedButton(onClick = onAddIntersection) { Text("+ Узел") }
+                if (allowAddIntersection) OutlinedButton(onClick = onAddIntersection) { Text("+ Узел") }
                 OutlinedButton(onClick = { showSimulation = true }, enabled = intersection != null) { Text("Моделирование") }
                 OutlinedButton(onClick = onBack) { Text("Назад") }
             }

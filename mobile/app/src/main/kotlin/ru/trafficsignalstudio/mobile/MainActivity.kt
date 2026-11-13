@@ -71,6 +71,7 @@ private fun TrafficSignalStudioApp() {
                 intersection = activeIntersection,
                 onBack = { selectedProject = null; selectedIntersectionId = null },
                 onSelectIntersection = { selectedIntersectionId = it },
+                allowAddIntersection = workspaceMode == WorkspaceMode.NETWORK,
                 onAddIntersection = {
                     val next = IntersectionTemplates.fourLeg().copy(name = "Перекрёсток " + (project.network.intersections.size + 1))
                     selectedProject = project.copy(updatedAtEpochMs = System.currentTimeMillis(),
