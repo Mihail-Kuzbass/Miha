@@ -902,12 +902,25 @@ private fun IntersectionGeometryPreview(
                         val uy = dy / length
                         val p = Offset(center.x + ((a.xMeters + b.xMeters) / 2.0).toFloat() * scale * 0.35f,
                             center.y - ((a.yMeters + b.yMeters) / 2.0).toFloat() * scale * 0.35f)
-                        drawLine(Color.White, Offset(p.x - ux * 5f, p.y - uy * 5f),
-                            Offset(p.x + ux * 5f, p.y + uy * 5f), 2.5f, cap = StrokeCap.Round)
-                        drawLine(Color.White, Offset(p.x + ux * 5f, p.y + uy * 5f),
-                            Offset(p.x + ux * 1f - uy * 3f, p.y + uy * 1f + ux * 3f), 2.5f, cap = StrokeCap.Round)
-                        drawLine(Color.White, Offset(p.x + ux * 5f, p.y + uy * 5f),
-                            Offset(p.x + ux * 1f + uy * 3f, p.y + uy * 1f - ux * 3f), 2.5f, cap = StrokeCap.Round)
+                        val lanePixelWidth = (lane.widthMeters * scale * 0.35f).toFloat()
+                        val iconSize = min(15f, lanePixelWidth * 0.72f).coerceAtLeast(7f)
+                        val movements = lane.allowedMovements
+                            .filter { it == MovementKind.THROUGH || it == MovementKind.LEFT ||
+                                it == MovementKind.RIGHT || it == MovementKind.U_TURN }
+                            .sortedBy { it.ordinal }
+                        if (movements.isEmpty()) {
+                            drawDirectionArrow(p, ux, uy, min(6f, lanePixelWidth * 0.22f))
+                        } else {
+                            val spacing = if (movements.size > 1) iconSize * 0.78f else 0f
+                            val rotation = Math.toDegrees(kotlin.math.atan2(uy.toDouble(), ux.toDouble())).toFloat() + 90f
+                            movements.forEachIndexed { index, movement ->
+                                val along = (index - (movements.size - 1) / 2f) * spacing
+                                val iconCenter = Offset(p.x + ux * along, p.y + uy * along)
+                                rotate(rotation, iconCenter) {
+                                    drawMovementArrow(iconCenter.x, iconCenter.y, movement, Color.White, iconSize)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -953,13 +966,20 @@ private fun IntersectionGeometryPreview(
                             val spacing = if (movements.size > 1) iconSize * 0.78f else 0f
                             movements.forEachIndexed { index, movement ->
                                 val offsetY = (index - (movements.size - 1) / 2f) * spacing
-                                drawMovementArrow(
-                                    x = laneCenterX,
-                                    y = arrowY + offsetY,
-                                    movement = movement,
-                                    color = Color.White,
-                                    size = iconSize
-                                )
+                                val iconCenter = Offset(laneCenterX, arrowY + offsetY)
+                                // The movement glyph is authored facing upward. Incoming
+                                // traffic on an approach travels toward the junction (down
+                                // this local road), so flip the complete glyph around its
+                                // center; this also keeps left/right relative to the driver.
+                                rotate(180f, iconCenter) {
+                                    drawMovementArrow(
+                                        x = iconCenter.x,
+                                        y = iconCenter.y,
+                                        movement = movement,
+                                        color = Color.White,
+                                        size = iconSize
+                                    )
+                                }
                             }
                         } else {
                             // Outbound lanes retain a simple arrow pointing away from the node.
@@ -1095,6 +1115,23 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMovementArrow(
         }
         MovementKind.TRANSIT_ONLY -> Unit
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDirectionArrow(
+    center: Offset,
+    directionX: Float,
+    directionY: Float,
+    wing: Float
+) {
+    val length = kotlin.math.hypot(directionX, directionY).coerceAtLeast(0.001f)
+    val ux = directionX / length
+    val uy = directionY / length
+    val tip = Offset(center.x + ux * 7f, center.y + uy * 7f)
+    val tail = Offset(center.x - ux * 7f, center.y - uy * 7f)
+    val base = Offset(center.x + ux * 1f, center.y + uy * 1f)
+    drawLine(Color.White, tail, tip, 2.5f, cap = StrokeCap.Round)
+    drawLine(Color.White, tip, Offset(base.x - uy * wing, base.y + ux * wing), 2.5f, cap = StrokeCap.Round)
+    drawLine(Color.White, tip, Offset(base.x + uy * wing, base.y - ux * wing), 2.5f, cap = StrokeCap.Round)
 }
 
 private fun offsetRoadPolyline(points: List<Point2D>, offsetMeters: Double): List<Point2D> {
