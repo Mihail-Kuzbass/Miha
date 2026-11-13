@@ -517,6 +517,8 @@ object TrafficSimulationEngine {
             } += zone
         }
 
+        val maximumCatalogVehicleLengthMeters = VehicleModelCatalog.defaults.maxOf { it.lengthMeters }
+        val maximumCatalogVehicleWidthMeters = VehicleModelCatalog.defaults.maxOf { it.widthMeters }
         // Refreshed once per simulation tick. Each movement list is sorted
         // front-to-back, allowing conflict checks to inspect only the foremost
         // vehicle that has not physically cleared a zone.
@@ -531,7 +533,7 @@ object TrafficSimulationEngine {
             // search window; the rear-bumper test below remains exact per vehicle.
             var low = 0
             var high = vehicles.size
-            val searchLimit = zoneExitFrontMeters + 25.0
+            val searchLimit = zoneExitFrontMeters + maximumCatalogVehicleLengthMeters
             while (low < high) {
                 val middle = (low + high) ushr 1
                 if (vehicles[middle].positionMeters > searchLimit) low = middle + 1
@@ -580,10 +582,13 @@ object TrafficSimulationEngine {
                 val ownStation = indexedZone.ownStationMeters
                 val otherStation = indexedZone.otherStationMeters
                 val otherState = states[otherConnectionId] ?: continue
-                val minimumClearance = max(1.0, vehicle.waiting.model.widthMeters / 2.0 + 0.75)
+                val minimumClearance = max(
+                    1.0,
+                    (vehicle.waiting.model.widthMeters + maximumCatalogVehicleWidthMeters) / 2.0 + 0.75
+                )
                 val other = foremostVehicleNotCleared(
                     otherConnectionId,
-                    otherStation + minimumClearance + 25.0
+                    otherStation + minimumClearance
                 ) ?: continue
                 if (other === vehicle || other.crashedUntilSeconds?.let { time >= it } == true) continue
                 val clearance = max(
@@ -739,8 +744,6 @@ object TrafficSimulationEngine {
                 ) <= horizonSeconds
             }
             if (relevantZones.isEmpty()) return null
-            val conflictingIds = relevantZones.mapTo(mutableSetOf()) { it.otherConnectionId }
-
             fun otherHasPriority(otherState: MovementState, other: VehicleAgent): Boolean {
                 val pairZones = conflictZonesByPair[
                     connectionPairKey(state.connectionId, otherState.connectionId)
@@ -783,8 +786,7 @@ object TrafficSimulationEngine {
                     val otherState = states[indexed.otherConnectionId] ?: return@forEach
                     val clearance = max(
                         1.0,
-                        (vehicle.waiting.model.widthMeters +
-                            VehicleModelCatalog.defaults.maxOfOrNull { it.widthMeters }!!) / 2.0 + 0.75
+                        (vehicle.waiting.model.widthMeters + maximumCatalogVehicleWidthMeters) / 2.0 + 0.75
                     )
                     val other = foremostVehicleNotCleared(
                         indexed.otherConnectionId,
