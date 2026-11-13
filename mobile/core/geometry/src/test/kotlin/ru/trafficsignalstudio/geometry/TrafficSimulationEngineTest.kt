@@ -54,10 +54,10 @@ class TrafficSimulationEngineTest {
         ))
         assertTrue(result.maximumQueueLengthMeters > 0.0)
         result.snapshots.forEach { snapshot ->
-            val approachVehicles = snapshot.activeVehicles
-                .filter { it.connectionId == "m1" && it.positionMeters <= 0.0 }
+            val sameMovementVehicles = snapshot.activeVehicles
+                .filter { it.connectionId == "m1" }
                 .sortedByDescending { it.positionMeters }
-            approachVehicles.zipWithNext().forEach { (leader, follower) ->
+            sameMovementVehicles.zipWithNext().forEach { (leader, follower) ->
                 val gap = leader.positionMeters - leader.lengthMeters - follower.positionMeters
                 assertTrue("Unsafe bumper gap $gap m", gap >= 1.9)
             }
