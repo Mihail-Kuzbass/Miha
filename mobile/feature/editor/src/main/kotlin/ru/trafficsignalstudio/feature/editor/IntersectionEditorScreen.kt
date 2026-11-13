@@ -95,7 +95,11 @@ fun IntersectionEditorScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(12.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
@@ -110,7 +114,9 @@ fun IntersectionEditorScreen(
             OutlinedButton(onClick = onBack) { Text("Назад") }
         }
 
-        Card(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        // Keep a real, visible drawing surface on short phone screens.
+        // The surrounding screen scrolls instead of squeezing this weighted card to zero height.
+        Card(modifier = Modifier.fillMaxWidth().height(320.dp)) {
             Box(modifier = Modifier.fillMaxSize().padding(6.dp)) {
                 if (intersection != null) {
                     IntersectionGeometryPreview(
