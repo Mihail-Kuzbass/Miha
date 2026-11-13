@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -28,6 +30,7 @@ import ru.trafficsignalstudio.data.local.ProjectJsonStore
 import ru.trafficsignalstudio.feature.editor.IntersectionEditorScreen
 import ru.trafficsignalstudio.geometry.IntersectionTemplates
 import ru.trafficsignalstudio.model.ProjectDocument
+import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.RoadNetwork
 
 class MainActivity : ComponentActivity() {
@@ -74,11 +77,11 @@ private fun TrafficSignalStudioApp() {
             HomeScreen(
                 projects = projects,
                 isLoading = isLoading,
-                onCreate = {
+                onCreate = { selectedTemplate ->
                     scope.launch {
                         val newProject = ProjectDocument.newProject("Новый проект").copy(
                             network = RoadNetwork(
-                                intersections = listOf(IntersectionTemplates.fourLeg())
+                                intersections = listOf(selectedTemplate)
                             )
                         )
                         withContext(Dispatchers.IO) { store.save(newProject) }
@@ -96,16 +99,46 @@ private fun TrafficSignalStudioApp() {
 private fun HomeScreen(
     projects: List<ProjectDocument>,
     isLoading: Boolean,
-    onCreate: () -> Unit,
+    onCreate: (Intersection) -> Unit,
     onOpen: (ProjectDocument) -> Unit
 ) {
+    var showTemplatePicker by remember { mutableStateOf(false) }
+    val templates = listOf(
+        "Четырёхсторонний перекрёсток" to { IntersectionTemplates.fourLeg() },
+        "Т-образный перекрёсток" to { IntersectionTemplates.tJunction() },
+        "Y-образный перекрёсток" to { IntersectionTemplates.yJunction() },
+        "Пятисторонний перекрёсток" to { IntersectionTemplates.fiveLeg() },
+        "Шестисторонний перекрёсток" to { IntersectionTemplates.sixLeg() },
+        "Круговое движение" to { IntersectionTemplates.roundabout() },
+        "Ромбовидная развязка" to { IntersectionTemplates.diamondInterchange() },
+        "Клеверная развязка" to { IntersectionTemplates.cloverleafInterchange() }
+    )
+    if (showTemplatePicker) {
+        AlertDialog(
+            onDismissRequest = { showTemplatePicker = false },
+            title = { Text("Выберите тип дорожного узла") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    templates.forEach { (title, factory) ->
+                        TextButton(onClick = {
+                            showTemplatePicker = false
+                            onCreate(factory())
+                        }, modifier = Modifier.fillMaxWidth()) { Text(title) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTemplatePicker = false }) { Text("Отмена") }
+            }
+        )
+    }
     Column(
         modifier = Modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("TrafficSignalStudio", style = MaterialTheme.typography.headlineMedium)
         Text("Мобильная инженерная среда проектирования и моделирования")
-        Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { showTemplatePicker = true }, modifier = Modifier.fillMaxWidth()) {
             Text("Создать проект")
         }
         Text("Последние проекты", style = MaterialTheme.typography.titleLarge)
