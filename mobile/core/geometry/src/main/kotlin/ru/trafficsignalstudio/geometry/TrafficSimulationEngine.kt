@@ -191,7 +191,9 @@ object TrafficSimulationEngine {
         val states = configured.associate { item ->
             val connection = connections.getValue(item.connectionId)
             val length = trajectories[item.connectionId]?.points?.let(::polylineLength)?.coerceAtLeast(8.0) ?: 20.0
-            item.connectionId to MovementState(item.connectionId, connection.fromLaneId, length)
+            item.connectionId to MovementState(
+                item.connectionId, "${connection.fromApproachId}|${connection.fromLaneId}", length
+            )
         }
         val laneGroups = states.values.groupBy { it.fromLaneId }
         if (laneGroups.values.any { group -> group.size > 1 }) {
@@ -297,12 +299,17 @@ object TrafficSimulationEngine {
                     }.minWithOrNull(compareBy<Pair<MovementState, WaitingVehicle>>({ it.second.arrivalTime }, { it.first.connectionId }))
                         ?: break
                     val waiting = candidate.second
-                    val upstreamFront = -demand.approachStorageLengthMeters + waiting.model.lengthMeters
                     val tail = group.flatMap { it.vehicles }
                         .filter { it.positionMeters <= 0.0 }
                         .minByOrNull { it.positionMeters - it.waiting.model.lengthMeters }
-                    val fits = tail == null ||
-                        (tail.positionMeters - tail.waiting.model.lengthMeters - upstreamFront >= waiting.model.minimumGapMeters)
+                    val upstreamFront = if (tail == null) {
+                        -demand.approachStorageLengthMeters + waiting.model.lengthMeters
+                    } else {
+                        tail.positionMeters - tail.waiting.model.lengthMeters -
+                            waiting.model.minimumGapMeters
+                    }
+                    val upstreamRear = upstreamFront - waiting.model.lengthMeters
+                    val fits = upstreamRear >= -demand.approachStorageLengthMeters - 1e-6
                     if (!fits || upstreamFront >= 0.0) break
                     candidate.first.pending.removeFirst()
                     candidate.first.vehicles += VehicleAgent(
