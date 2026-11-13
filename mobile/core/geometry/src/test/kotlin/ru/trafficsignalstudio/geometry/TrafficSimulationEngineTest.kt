@@ -54,17 +54,17 @@ class TrafficSimulationEngineTest {
             approachStorageLengthMeters = 45.0,
             minimumGapMeters = 2.0
         ))
-        assertTrue(result.maximumLaneStorageUtilizationPercent <= 100.0 + 1e-6)
-        assertTrue(result.upstreamQueueAtEnd > 0 || result.totalQueueAtEnd > 0)
+        assertTrue(result.maximumQueueLengthMeters <= 45.0 + 1e-6)
+        assertTrue(result.spillbackVehiclesAtEnd > 0 || result.totalQueueAtEnd > 0)
         val snapshot = result.snapshots.last()
         val laneVehicles = snapshot.activeVehicles
-            .filter { it.distanceToStopLineMeters != null && it.distanceToStopLineMeters <= 45.0 + 1e-6 }
-            .sortedBy { it.distanceToStopLineMeters }
+            .filter { it.positionMeters <= 0.0 }
+            .sortedByDescending { it.positionMeters }
         laneVehicles.zipWithNext().forEach { (leader, follower) ->
-            val leaderRear = leader.distanceToStopLineMeters!! + leader.lengthMeters
+            val leaderRear = leader.positionMeters - leader.lengthMeters
             assertTrue(
                 "Vehicle bodies overlap or gap is too small: leader=$leader follower=$follower",
-                follower.distanceToStopLineMeters!! - leaderRear >= 1.9
+                leaderRear - follower.positionMeters >= 1.9
             )
         }
     }
@@ -78,7 +78,7 @@ class TrafficSimulationEngineTest {
         ))
         val busSprites = busResult.snapshots.flatMap { it.activeVehicles }
         assertTrue(busSprites.any { it.vehicleClass == VehicleClass.CITY_BUS && it.lengthMeters == 12.0 })
-        assertTrue(busResult.maximumLaneStorageUtilizationPercent > 0.0)
+        assertTrue(busResult.maximumQueueLengthMeters > 0.0)
     }
 
     @Test(expected = IllegalArgumentException::class)
