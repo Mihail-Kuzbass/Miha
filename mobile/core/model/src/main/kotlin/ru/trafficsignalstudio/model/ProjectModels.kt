@@ -88,6 +88,22 @@ data class LaneConnection(
     val toLaneId: String
 )
 
+/** A signal phase grants green to the listed lane-to-lane movements. */
+data class SignalPhase(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val greenConnectionIds: Set<String>,
+    val greenSeconds: Int = 30,
+    val yellowSeconds: Int = 3,
+    val allRedSeconds: Int = 1
+)
+
+data class SignalPlan(
+    val phases: List<SignalPhase> = emptyList(),
+    /** If false, phase separation is not used to declare movements non-conflicting. */
+    val enabled: Boolean = true
+)
+
 data class SafetyIsland(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "Островок безопасности",
@@ -104,7 +120,8 @@ data class Intersection(
     val roadSegments: List<RoadSegment> = emptyList(),
     val junctionNodes: List<RoadJunctionNode> = emptyList(),
     val safetyIslands: List<SafetyIsland> = emptyList(),
-    val laneConnections: List<LaneConnection> = emptyList()
+    val laneConnections: List<LaneConnection> = emptyList(),
+    val signalPlan: SignalPlan? = null
 )
 
 data class RoadNetwork(
