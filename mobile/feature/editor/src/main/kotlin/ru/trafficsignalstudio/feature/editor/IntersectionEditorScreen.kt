@@ -49,6 +49,9 @@ import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.LaneFlowDirection
 import ru.trafficsignalstudio.model.LaneConnection
+import ru.trafficsignalstudio.model.LaneTravelDirection
+import ru.trafficsignalstudio.geometry.TrajectoryConflictAnalyzer
+import ru.trafficsignalstudio.geometry.TrajectoryConflictKind
 import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.RoadSegment
@@ -89,6 +92,7 @@ fun IntersectionEditorScreen(
     val safeIndex = selectedApproachIndex.coerceIn(0, max(0, (intersection?.approaches?.size ?: 1) - 1))
     val selectedApproach = intersection?.approaches?.getOrNull(safeIndex)
     val validationErrors = intersection?.let(IntersectionGeometryEditor::validate).orEmpty()
+    val trajectoryConflicts = intersection?.let(TrajectoryConflictAnalyzer::analyze).orEmpty()
 
     fun updateIntersection(updated: Intersection) {
         onProjectChange(
@@ -243,21 +247,73 @@ fun IntersectionEditorScreen(
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(onClick = {
-                                val v = selectedSegment.copy(laneCount = (selectedSegment.laneCount - 1).coerceAtLeast(1))
-                                updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map { if (it.id == selectedSegment.id) v else it }))
+                                updateIntersection(IntersectionGeometryEditor.setRoadLaneCount(intersection, selectedSegment.id, (selectedSegment.laneCount - 1).coerceAtLeast(1)))
                             }, enabled = selectedSegment.laneCount > 1) { Text("− полоса") }
                             OutlinedButton(onClick = {
-                                val v = selectedSegment.copy(laneCount = (selectedSegment.laneCount + 1).coerceAtMost(16))
-                                updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map { if (it.id == selectedSegment.id) v else it }))
+                                updateIntersection(IntersectionGeometryEditor.setRoadLaneCount(intersection, selectedSegment.id, (selectedSegment.laneCount + 1).coerceAtMost(16)))
                             }, enabled = selectedSegment.laneCount < 16) { Text("+ полоса") }
                             OutlinedButton(onClick = {
-                                val v = selectedSegment.copy(widthMeters = (selectedSegment.widthMeters - 0.5).coerceAtLeast(2.5))
-                                updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map { if (it.id == selectedSegment.id) v else it }))
+                                updateIntersection(IntersectionGeometryEditor.changeRoadSegmentWidth(intersection, selectedSegment.id, -0.5))
                             }, enabled = selectedSegment.widthMeters > 2.5) { Text("− ширина") }
                             OutlinedButton(onClick = {
-                                val v = selectedSegment.copy(widthMeters = (selectedSegment.widthMeters + 0.5).coerceAtMost(60.0))
-                                updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map { if (it.id == selectedSegment.id) v else it }))
+                                updateIntersection(IntersectionGeometryEditor.changeRoadSegmentWidth(intersection, selectedSegment.id, 0.5))
                             }, enabled = selectedSegment.widthMeters < 60.0) { Text("+ ширина") }
+                        }
+                        Text("Индивидуальные полосы", style = MaterialTheme.typography.titleSmall)
+                        IntersectionGeometryEditor.effectiveRoadLanes(selectedSegment).forEach { roadLane ->
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Полоса ${roadLane.index} · ${"%.2f".format(roadLane.widthMeters)} м",
+                                        style = MaterialTheme.typography.bodyMedium)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        OutlinedButton(onClick = {
+                                            updateIntersection(IntersectionGeometryEditor.changeRoadLaneWidth(
+                                                intersection, selectedSegment.id, roadLane.id, -0.25))
+                                        }, enabled = roadLane.widthMeters > 2.5) { Text("−") }
+                                        OutlinedButton(onClick = {
+                                            updateIntersection(IntersectionGeometryEditor.changeRoadLaneWidth(
+                                                intersection, selectedSegment.id, roadLane.id, 0.25))
+                                        }, enabled = roadLane.widthMeters < 5.0) { Text("+") }
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    OutlinedButton(onClick = {
+                                        val next = if (roadLane.travelDirection == LaneTravelDirection.ALONG_CENTERLINE)
+                                            LaneTravelDirection.AGAINST_CENTERLINE else LaneTravelDirection.ALONG_CENTERLINE
+                                        updateIntersection(IntersectionGeometryEditor.setRoadLaneDirection(
+                                            intersection, selectedSegment.id, roadLane.id, next))
+                                    }) {
+                                        Text(if (roadLane.travelDirection == LaneTravelDirection.ALONG_CENTERLINE)
+                                            "→ По оси" else "← Против оси")
+                                    }
+                                }
+                                Row(modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    listOf(
+                                        MovementKind.THROUGH to "Прямо",
+                                        MovementKind.LEFT to "Налево",
+                                        MovementKind.RIGHT to "Направо",
+                                        MovementKind.U_TURN to "Разворот"
+                                    ).forEach { (movement, title) ->
+                                        val enabled = movement in roadLane.allowedMovements
+                                        if (enabled) Button(onClick = {
+                                            val next = if (roadLane.allowedMovements.size > 1)
+                                                roadLane.allowedMovements - movement else roadLane.allowedMovements
+                                            updateIntersection(IntersectionGeometryEditor.setRoadLaneMovements(
+                                                intersection, selectedSegment.id, roadLane.id, next))
+                                        }) { Text(title) }
+                                        else OutlinedButton(onClick = {
+                                            updateIntersection(IntersectionGeometryEditor.setRoadLaneMovements(
+                                                intersection, selectedSegment.id, roadLane.id,
+                                                roadLane.allowedMovements + movement))
+                                        }) { Text(title) }
+                                    }
+                                }
+                            }
                         }
                         OutlinedButton(onClick = {
                             val remaining = intersection.roadSegments.filterNot { it.id == selectedSegment.id }
@@ -265,6 +321,36 @@ fun IntersectionEditorScreen(
                             selectedRoadSegmentId = null
                         }) { Text("Удалить дорогу") }
                     } else if (editMode) Text("Выберите дорожный сегмент касанием на поле.")
+                }
+            }
+        }
+
+        if (intersection != null) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Пересечения и конфликты траекторий", style = MaterialTheme.typography.titleMedium)
+                    Text("Найдено геометрических конфликтов: ${trajectoryConflicts.size}",
+                        color = if (trajectoryConflicts.isEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    if (trajectoryConflicts.isEmpty()) {
+                        Text("Между полосами свободно нарисованных сегментов конфликтов в плане не обнаружено.",
+                            style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        trajectoryConflicts.take(8).forEach { conflict ->
+                            val firstName = intersection.roadSegments.firstOrNull { it.id == conflict.firstSegmentId }?.name ?: "Дорога"
+                            val secondName = intersection.roadSegments.firstOrNull { it.id == conflict.secondSegmentId }?.name ?: "Дорога"
+                            val kind = when (conflict.kind) {
+                                TrajectoryConflictKind.CROSSING -> "Пересечение"
+                                TrajectoryConflictKind.MERGING -> "Слияние"
+                                TrajectoryConflictKind.SHARED_PATH -> "Общий участок"
+                            }
+                            Text("$kind: $firstName, полоса ${conflict.firstLaneIndex} ↔ $secondName, полоса ${conflict.secondLaneIndex} · (${"%.1f".format(conflict.point.xMeters)}, ${"%.1f".format(conflict.point.yMeters)}) м",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (trajectoryConflicts.size > 8) Text("И ещё ${trajectoryConflicts.size - 8} конфликтов…",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("Проверка учитывает геометрические пересечения полос на одном высотном уровне. Это предварительный анализ, не нормативная экспертиза.",
+                        style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -662,9 +748,44 @@ private fun IntersectionGeometryPreview(
                     drawPath(path, Color(0xFFE0E5E8),
                         style = Stroke(width = 3f, cap = StrokeCap.Round))
                 }
-                if (segment.laneCount > 1) {
-                    drawPath(path, Color.White.copy(alpha = 0.8f),
+                val segmentLanes = IntersectionGeometryEditor.effectiveRoadLanes(segment)
+                var laneOffset = -segmentLanes.sumOf { it.widthMeters } / 2.0
+                segmentLanes.dropLast(1).forEach { lane ->
+                    laneOffset += lane.widthMeters
+                    val boundaryPoints = offsetRoadPolyline(segment.centerline, laneOffset).map { point ->
+                        Offset(center.x + point.xMeters.toFloat() * scale * 0.35f,
+                            center.y - point.yMeters.toFloat() * scale * 0.35f)
+                    }
+                    val boundaryPath = Path().apply {
+                        moveTo(boundaryPoints.first().x, boundaryPoints.first().y)
+                        boundaryPoints.drop(1).forEach { lineTo(it.x, it.y) }
+                    }
+                    drawPath(boundaryPath, Color.White.copy(alpha = 0.85f),
                         style = Stroke(width = 1.5f, pathEffect = dash, cap = StrokeCap.Round))
+                }
+                var laneStart = -segmentLanes.sumOf { it.widthMeters } / 2.0
+                segmentLanes.forEach { lane ->
+                    val offset = laneStart + lane.widthMeters / 2.0
+                    laneStart += lane.widthMeters
+                    var lanePoints = offsetRoadPolyline(segment.centerline, offset)
+                    if (lane.travelDirection == LaneTravelDirection.AGAINST_CENTERLINE) lanePoints = lanePoints.reversed()
+                    if (lanePoints.size >= 2) {
+                        val a = lanePoints[lanePoints.lastIndex / 2]
+                        val b = lanePoints[(lanePoints.lastIndex / 2 + 1).coerceAtMost(lanePoints.lastIndex)]
+                        val dx = (b.xMeters - a.xMeters).toFloat()
+                        val dy = -(b.yMeters - a.yMeters).toFloat()
+                        val length = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001f)
+                        val ux = dx / length
+                        val uy = dy / length
+                        val p = Offset(center.x + ((a.xMeters + b.xMeters) / 2.0).toFloat() * scale * 0.35f,
+                            center.y - ((a.yMeters + b.yMeters) / 2.0).toFloat() * scale * 0.35f)
+                        drawLine(Color.White, Offset(p.x - ux * 5f, p.y - uy * 5f),
+                            Offset(p.x + ux * 5f, p.y + uy * 5f), 2.5f, cap = StrokeCap.Round)
+                        drawLine(Color.White, Offset(p.x + ux * 5f, p.y + uy * 5f),
+                            Offset(p.x + ux * 1f - uy * 3f, p.y + uy * 1f + ux * 3f), 2.5f, cap = StrokeCap.Round)
+                        drawLine(Color.White, Offset(p.x + ux * 5f, p.y + uy * 5f),
+                            Offset(p.x + ux * 1f + uy * 3f, p.y + uy * 1f - ux * 3f), 2.5f, cap = StrokeCap.Round)
+                    }
                 }
             }
         }
@@ -860,6 +981,18 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMovementArrow(
             drawLine(color, Offset(x, y - half * 0.45f), Offset(x + half * 0.32f, y - half * 0.1f), 2.5f, cap = StrokeCap.Round)
         }
         MovementKind.TRANSIT_ONLY -> Unit
+    }
+}
+
+private fun offsetRoadPolyline(points: List<Point2D>, offsetMeters: Double): List<Point2D> {
+    if (points.size < 2 || kotlin.math.abs(offsetMeters) < 1e-8) return points
+    return points.mapIndexed { index, point ->
+        val before = points[(index - 1).coerceAtLeast(0)]
+        val after = points[(index + 1).coerceAtMost(points.lastIndex)]
+        val dx = after.xMeters - before.xMeters
+        val dy = after.yMeters - before.yMeters
+        val length = kotlin.math.hypot(dx, dy).coerceAtLeast(1e-8)
+        Point2D(point.xMeters - dy / length * offsetMeters, point.yMeters + dx / length * offsetMeters)
     }
 }
 
