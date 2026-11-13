@@ -29,6 +29,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import ru.trafficsignalstudio.geometry.IntersectionGeometryEditor
@@ -214,16 +216,41 @@ private fun IntersectionGeometryPreview(
 ) {
     Canvas(modifier = modifier.background(Color(0xFFE8EEE8), RoundedCornerShape(12.dp))) {
         val center = Offset(size.width / 2f, size.height / 2f)
-        // Keep the drawing scale independent from the current lane count.
-        // Otherwise the widest road is always normalized to the same pixel width,
-        // making lane-count edits visually indistinguishable.
-        val referenceRoadWidthMeters = 14.0f // 4 lanes × 3.5 m
-        val scale = size.minDimension * 0.28f / referenceRoadWidthMeters
+        // Fixed scale keeps lane-count changes visible and gives custom layouts
+        // a stable drawing coordinate system.
+        val scale = size.minDimension * 0.28f / 14.0f
         val roadWidths = intersection.approaches.associate { approach ->
             approach.id to (approach.lanes.sumOf { it.widthMeters }.toFloat() * scale).coerceAtLeast(24f)
         }
         val junctionHalf = (roadWidths.values.maxOrNull() ?: 24f) / 2f
         val dash = PathEffect.dashPathEffect(floatArrayOf(14f, 12f))
+
+        // Draw independent centerline segments first. Their elevation level is
+        // visual metadata; conflict analysis will use it in a later engine step.
+        intersection.roadSegments.sortedBy { it.elevationLevel }.forEach { segment ->
+            if (segment.centerline.size >= 2) {
+                val path = Path().apply {
+                    val first = segment.centerline.first()
+                    moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f,
+                        center.y - first.yMeters.toFloat() * scale * 0.35f)
+                    segment.centerline.drop(1).forEach { point ->
+                        lineTo(center.x + point.xMeters.toFloat() * scale * 0.35f,
+                            center.y - point.yMeters.toFloat() * scale * 0.35f)
+                    }
+                }
+                val width = (segment.widthMeters.toFloat() * scale).coerceAtLeast(10f)
+                if (segment.elevationLevel > 0) {
+                    drawPath(path, Color(0xFFB7BEC5),
+                        style = Stroke(width = width + 5f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                }
+                drawPath(path, Color(0xFF59616A),
+                    style = Stroke(width = width, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                if (segment.laneCount > 1) {
+                    drawPath(path, Color.White.copy(alpha = 0.8f),
+                        style = Stroke(width = 1.5f, pathEffect = dash, cap = StrokeCap.Round))
+                }
+            }
+        }
 
         intersection.approaches.forEach { approach ->
             val heading = ((approach.headingDegrees % 360.0) + 360.0) % 360.0
@@ -233,46 +260,35 @@ private fun IntersectionGeometryPreview(
                 offset + lane.widthMeters.toFloat() * scale
             }.drop(1)
 
-            when {
-                heading < 45.0 || heading >= 315.0 -> {
-                    drawRect(Color(0xFF59616A), Offset(center.x - half, 0f), Size(roadWidth, center.y))
-                    laneDividerOffsets.forEach { offset ->
-                        val x = center.x + offset
-                        drawLine(Color.White, Offset(x, 0f), Offset(x, center.y - junctionHalf), 2f, pathEffect = dash)
-                    }
-                    drawLine(Color.White, Offset(center.x - half, center.y - junctionHalf - 16f), Offset(center.x + half, center.y - junctionHalf - 16f), 4f)
+            // Local geometry points north; rotating it supports any approach
+            // azimuth, not just the four cardinal directions.
+            androidx.compose.ui.graphics.drawscope.rotate(heading.toFloat(), center) {
+                drawRect(Color(0xFF59616A), Offset(center.x - half, 0f),
+                    Size(roadWidth, center.y))
+                laneDividerOffsets.forEach { offset ->
+                    val x = center.x + offset
+                    drawLine(Color.White, Offset(x, 0f),
+                        Offset(x, center.y - junctionHalf), 2f, pathEffect = dash)
                 }
-                heading >= 135.0 && heading < 225.0 -> {
-                    drawRect(Color(0xFF59616A), Offset(center.x - half, center.y), Size(roadWidth, size.height - center.y))
-                    laneDividerOffsets.forEach { offset ->
-                        val x = center.x + offset
-                        drawLine(Color.White, Offset(x, center.y + junctionHalf), Offset(x, size.height), 2f, pathEffect = dash)
-                    }
-                    drawLine(Color.White, Offset(center.x - half, center.y + junctionHalf + 16f), Offset(center.x + half, center.y + junctionHalf + 16f), 4f)
-                }
-                heading >= 45.0 && heading < 135.0 -> {
-                    drawRect(Color(0xFF59616A), Offset(center.x, center.y - half), Size(size.width - center.x, roadWidth))
-                    laneDividerOffsets.forEach { offset ->
-                        val y = center.y + offset
-                        drawLine(Color.White, Offset(center.x + junctionHalf, y), Offset(size.width, y), 2f, pathEffect = dash)
-                    }
-                    drawLine(Color.White, Offset(center.x + junctionHalf + 16f, center.y - half), Offset(center.x + junctionHalf + 16f, center.y + half), 4f)
-                }
-                else -> {
-                    drawRect(Color(0xFF59616A), Offset(0f, center.y - half), Size(center.x, roadWidth))
-                    laneDividerOffsets.forEach { offset ->
-                        val y = center.y + offset
-                        drawLine(Color.White, Offset(0f, y), Offset(center.x - junctionHalf, y), 2f, pathEffect = dash)
-                    }
-                    drawLine(Color.White, Offset(center.x - junctionHalf - 16f, center.y - half), Offset(center.x - junctionHalf - 16f, center.y + half), 4f)
-                }
+                drawLine(Color.White,
+                    Offset(center.x - half, center.y - junctionHalf - 16f),
+                    Offset(center.x + half, center.y - junctionHalf - 16f), 4f)
             }
         }
-        drawRect(
-            Color(0xFF59616A),
-            topLeft = Offset(center.x - junctionHalf, center.y - junctionHalf),
-            size = Size(junctionHalf * 2f, junctionHalf * 2f)
-        )
+
+        if (intersection.type == ru.trafficsignalstudio.model.IntersectionType.ROUNDABOUT) {
+            val radius = junctionHalf * 0.82f
+            drawCircle(Color(0xFF59616A), radius = radius + 17f, center = center)
+            drawCircle(Color(0xFFE8EEE8), radius = radius - 15f, center = center)
+            drawCircle(Color.White, radius = radius + 1f, center = center,
+                style = Stroke(width = 2f, pathEffect = dash))
+        } else if (intersection.roadSegments.isEmpty()) {
+            drawRect(Color(0xFF59616A),
+                topLeft = Offset(center.x - junctionHalf, center.y - junctionHalf),
+                size = Size(junctionHalf * 2f, junctionHalf * 2f))
+        }
+
+        // A small center marker is retained for orientation while editing.
         drawCircle(Color(0xFF20262D), radius = 4f, center = center, style = Stroke(width = 2f))
     }
 }
