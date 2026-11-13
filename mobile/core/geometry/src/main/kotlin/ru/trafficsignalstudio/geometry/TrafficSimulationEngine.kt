@@ -407,6 +407,132 @@ object TrafficSimulationEngine {
             ) to direction
         }
 
+        /**
+         * Project a geometric conflict point onto a movement centreline.
+         * The returned station is measured from the stop-line origin used by
+         * VehicleAgent.positionMeters.
+         */
+        fun distanceAlongPath(points: List<Point2D>, point: Point2D): Double {
+            var travelled = 0.0
+            var bestDistance = Double.POSITIVE_INFINITY
+            var bestStation = 0.0
+            for ((a, b) in points.zipWithNext()) {
+                val dx = b.xMeters - a.xMeters
+                val dy = b.yMeters - a.yMeters
+                val segmentLength = hypot(dx, dy)
+                if (segmentLength <= 1e-8) continue
+                val projection = (((point.xMeters - a.xMeters) * dx +
+                    (point.yMeters - a.yMeters) * dy) / (segmentLength * segmentLength))
+                    .coerceIn(0.0, 1.0)
+                val projectedX = a.xMeters + dx * projection
+                val projectedY = a.yMeters + dy * projection
+                val distance = hypot(point.xMeters - projectedX, point.yMeters - projectedY)
+                if (distance < bestDistance) {
+                    bestDistance = distance
+                    bestStation = travelled + segmentLength * projection
+                }
+                travelled += segmentLength
+            }
+            return bestStation
+        }
+
+        data class ConflictZone(
+            val firstConnectionId: String,
+            val secondConnectionId: String,
+            val firstStationMeters: Double,
+            val secondStationMeters: Double,
+            val point: Point2D
+        )
+
+        data class ConflictControl(
+            val accelerationMetersPerSecondSquared: Double,
+            val stopAtFrontPositionMeters: Double
+        )
+
+        // Each geometric crossing becomes a time-domain reservation zone.
+        // A vehicle owns the zone from its front entering the clearance envelope
+        // until its rear has completely cleared it.
+        val conflictZones = movementConflicts.mapNotNull { conflict ->
+            val first = trajectories[conflict.firstConnectionId] ?: return@mapNotNull null
+            val second = trajectories[conflict.secondConnectionId] ?: return@mapNotNull null
+            ConflictZone(
+                conflict.firstConnectionId,
+                conflict.secondConnectionId,
+                distanceAlongPath(first.points, conflict.point),
+                distanceAlongPath(second.points, conflict.point),
+                conflict.point
+            )
+        }
+
+        fun timeToCoverDistance(distanceMeters: Double, vehicle: VehicleAgent): Double {
+            if (distanceMeters <= 0.0) return 0.0
+            val speed = vehicle.speedMetersPerSecond
+            val acceleration = vehicle.waiting.model.accelerationMetersPerSecondSquared.coerceAtLeast(0.1)
+            if (speed < 0.1) return sqrt(2.0 * distanceMeters / acceleration)
+            val discriminant = speed * speed + 2.0 * acceleration * distanceMeters
+            return (sqrt(discriminant) - speed) / acceleration
+        }
+
+        /**
+         * Dynamic conflict-zone reservation. The earliest vehicle to reach a
+         * zone gets priority; simulation ID is used only for near-simultaneous
+         * arrivals. A vehicle already occupying the zone always retains it.
+         */
+        fun conflictZoneControl(state: MovementState, vehicle: VehicleAgent): ConflictControl? {
+            var selected: ConflictControl? = null
+            for (zone in conflictZones) {
+                val ownIsFirst = zone.firstConnectionId == state.connectionId
+                if (!ownIsFirst && zone.secondConnectionId != state.connectionId) continue
+                val otherConnectionId = if (ownIsFirst) zone.secondConnectionId else zone.firstConnectionId
+                val ownStation = if (ownIsFirst) zone.firstStationMeters else zone.secondStationMeters
+                val otherStation = if (ownIsFirst) zone.secondStationMeters else zone.firstStationMeters
+                val otherState = states[otherConnectionId] ?: continue
+                for (other in otherState.vehicles) {
+                    if (other === vehicle || other.crashedUntilSeconds?.let { time >= it } == true) continue
+                    val clearance = max(
+                        1.0,
+                        (vehicle.waiting.model.widthMeters + other.waiting.model.widthMeters) / 2.0 + 0.75
+                    )
+                    val ownEntryFront = ownStation - clearance
+                    val ownExitFront = ownStation + clearance + vehicle.waiting.model.lengthMeters
+                    val otherEntryFront = otherStation - clearance
+                    val otherExitFront = otherStation + clearance + other.waiting.model.lengthMeters
+                    val ownEntryTime = timeToCoverDistance(ownEntryFront - vehicle.positionMeters, vehicle)
+                    val ownExitTime = timeToCoverDistance(ownExitFront - vehicle.positionMeters, vehicle)
+                    val otherEntryTime = timeToCoverDistance(otherEntryFront - other.positionMeters, other)
+                    val otherExitTime = timeToCoverDistance(otherExitFront - other.positionMeters, other)
+                    val ownInside = vehicle.positionMeters >= ownEntryFront &&
+                        vehicle.positionMeters - vehicle.waiting.model.lengthMeters <= ownStation + clearance
+                    val otherInside = other.positionMeters >= otherEntryFront &&
+                        other.positionMeters - other.waiting.model.lengthMeters <= otherStation + clearance
+                    val intervalsOverlap = ownEntryTime <= otherExitTime + 0.35 &&
+                        otherEntryTime <= ownExitTime + 0.35
+                    if (!intervalsOverlap || ownInside) continue
+                    val otherHasPriority = otherInside ||
+                        (!ownInside && (otherEntryTime < ownEntryTime - 0.35 ||
+                            (kotlin.math.abs(otherEntryTime - ownEntryTime) <= 0.35 &&
+                                other.waiting.id < vehicle.waiting.id)))
+                    if (!otherHasPriority) continue
+
+                    val stopPosition = ownEntryFront - 0.5
+                    val distanceToStop = stopPosition - vehicle.positionMeters
+                    val serviceDeceleration = vehicle.waiting.model
+                        .serviceDecelerationMetersPerSecondSquared.coerceAtLeast(0.5)
+                    val reactionAdjustedDistance = distanceToStop -
+                        vehicle.speedMetersPerSecond * 0.4
+                    val requiredDeceleration = if (reactionAdjustedDistance <= 0.0) serviceDeceleration
+                    else (vehicle.speedMetersPerSecond * vehicle.speedMetersPerSecond /
+                        (2.0 * reactionAdjustedDistance)).coerceIn(0.8, serviceDeceleration)
+                    val candidate = ConflictControl(-requiredDeceleration, stopPosition)
+                    if (selected == null ||
+                        candidate.stopAtFrontPositionMeters < selected!!.stopAtFrontPositionMeters) {
+                        selected = candidate
+                    }
+                }
+            }
+            return selected
+        }
+
         fun opposingGapIsSafe(
             state: MovementState,
             vehicle: VehicleAgent,
@@ -875,14 +1001,27 @@ object TrafficSimulationEngine {
 
                     val desiredSpeed = min(demand.approachSpeedKmh, model.maximumSpeedKmh) / 3.6
                     val followingAcceleration = idmAcceleration(vehicle, obstacleGap, obstacleSpeed, desiredSpeed)
-                    val collisionAvoidanceAcceleration = predictiveCollisionBrake(state, vehicle)
-                    val acceleration = if (collisionAvoidanceAcceleration == null) followingAcceleration
-                        else min(followingAcceleration, collisionAvoidanceAcceleration)
+                    val zoneControl = conflictZoneControl(state, vehicle)
+                    val predictiveAcceleration = predictiveCollisionBrake(state, vehicle)
+                    val safetyAcceleration = zoneControl?.accelerationMetersPerSecondSquared
+                        ?: predictiveAcceleration
+                    val acceleration = if (safetyAcceleration == null) followingAcceleration
+                        else min(followingAcceleration, safetyAcceleration)
                     val oldPosition = vehicle.positionMeters
                     val nextSpeed = (vehicle.speedMetersPerSecond + acceleration * step)
                         .coerceIn(0.0, desiredSpeed.coerceAtLeast(0.1))
                     var nextPosition = oldPosition +
                         (vehicle.speedMetersPerSecond + nextSpeed) * 0.5 * step
+
+                    // Enforce the reservation boundary kinematically as well as
+                    // through braking, so a large integration step cannot jump
+                    // a vehicle into an occupied conflict zone.
+                    if (zoneControl != null &&
+                        oldPosition <= zoneControl.stopAtFrontPositionMeters &&
+                        nextPosition >= zoneControl.stopAtFrontPositionMeters) {
+                        nextPosition = zoneControl.stopAtFrontPositionMeters
+                        vehicle.speedMetersPerSecond = 0.0
+                    }
 
                     if (onApproach && (!greenFor(state.connectionId, time) ||
                             (isBlocked(state.connectionId, time) && vehicle.passingOffsetMeters <= 0.5)) &&
