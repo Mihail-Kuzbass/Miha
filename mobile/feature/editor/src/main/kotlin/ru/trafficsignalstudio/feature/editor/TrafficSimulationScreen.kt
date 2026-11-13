@@ -124,7 +124,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 }
             }
         }
-        if (intersection.signalPlan == null || intersection.signalPlan.phases.isEmpty()) {
+        if (intersection.signalPlan?.phases.isNullOrEmpty()) {
             Card { Text("Для моделирования выпуска транспорта настройте светофорный план и назначьте движения фазам.",
                 modifier = Modifier.padding(12.dp)) }
         }
