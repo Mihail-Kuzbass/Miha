@@ -4,6 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.Assert.assertThrows
+import ru.trafficsignalstudio.model.Point2D
+import ru.trafficsignalstudio.model.RoadSegment
+import ru.trafficsignalstudio.model.RoadSegmentKind
 
 class IntersectionTemplatesTest {
     @Test
@@ -26,6 +29,26 @@ class IntersectionTemplatesTest {
         assertEquals(5, IntersectionTemplates.fiveLeg().approaches.size)
         assertEquals(6, IntersectionTemplates.sixLeg().approaches.size)
         assertEquals(4, IntersectionTemplates.roundabout().approaches.size)
+    }
+
+    @Test
+    fun freehandRoadSegmentKindsAreAcceptedAndValidated() {
+        val base = IntersectionTemplates.fourLeg()
+        val arc = RoadSegment(
+            name = "Дуговой съезд",
+            centerline = listOf(Point2D(-20.0, 0.0), Point2D(0.0, 20.0), Point2D(20.0, 0.0)),
+            kind = RoadSegmentKind.ARC
+        )
+        val bridge = RoadSegment(
+            name = "Путепровод",
+            centerline = listOf(Point2D(-30.0, 10.0), Point2D(30.0, 10.0)),
+            elevationLevel = 1,
+            kind = RoadSegmentKind.BRIDGE
+        )
+        val edited = base.copy(roadSegments = listOf(arc, bridge))
+        assertTrue(IntersectionGeometryEditor.validate(edited).isEmpty())
+        assertEquals(RoadSegmentKind.ARC, edited.roadSegments[0].kind)
+        assertEquals(1, edited.roadSegments[1].elevationLevel)
     }
 
     @Test
