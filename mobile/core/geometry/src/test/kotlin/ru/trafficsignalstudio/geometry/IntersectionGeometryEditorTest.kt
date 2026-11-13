@@ -3,6 +3,7 @@ package ru.trafficsignalstudio.geometry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.trafficsignalstudio.model.MovementKind
 
 class IntersectionGeometryEditorTest {
     @Test
@@ -40,6 +41,32 @@ class IntersectionGeometryEditorTest {
     fun standardTemplatePassesGeometryValidation() {
         val errors = IntersectionGeometryEditor.validate(IntersectionTemplates.fourLeg())
         assertTrue(errors.toString(), errors.isEmpty())
+    }
+
+    @Test
+    fun laneMovementsCanBeConfiguredIndependently() {
+        val intersection = IntersectionTemplates.fourLeg(lanesPerApproach = 2)
+        val approach = intersection.approaches.first()
+        val firstLane = approach.lanes[0]
+        val secondLane = approach.lanes[1]
+
+        val configured = IntersectionGeometryEditor.setLaneMovements(
+            intersection, approach.id, firstLane.id,
+            setOf(MovementKind.THROUGH, MovementKind.RIGHT)
+        )
+
+        assertEquals(setOf(MovementKind.THROUGH, MovementKind.RIGHT),
+            configured.approaches.first().lanes[0].allowedMovements)
+        assertEquals(secondLane.allowedMovements, configured.approaches.first().lanes[1].allowedMovements)
+        assertEquals(intersection.approaches[1], configured.approaches[1])
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun laneCannotHaveNoAllowedMovements() {
+        val intersection = IntersectionTemplates.fourLeg()
+        val approach = intersection.approaches.first()
+        val lane = approach.lanes.first()
+        IntersectionGeometryEditor.setLaneMovements(intersection, approach.id, lane.id, emptySet())
     }
 
     @Test(expected = IllegalArgumentException::class)
