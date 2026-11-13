@@ -9,6 +9,7 @@ import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.RoadSegment
 import ru.trafficsignalstudio.model.RoadSegmentLane
 import ru.trafficsignalstudio.model.LaneTravelDirection
+import ru.trafficsignalstudio.model.SignalPlan
 
 /**
  * Pure geometry-editing operations. All dimensions are stored in metres;
@@ -227,6 +228,19 @@ object IntersectionGeometryEditor {
             else if (source.flowDirection != LaneFlowDirection.INTO_INTERSECTION) add("Исходная полоса связи не направлена к перекрёстку")
             if (target == null) add("Связь полосы ссылается на отсутствующую выездную полосу")
             else if (target.flowDirection != LaneFlowDirection.OUT_OF_INTERSECTION) add("Целевая полоса связи не направлена от перекрёстка")
+        }
+        intersection.signalPlan?.let { plan ->
+            val connectionIds = intersection.laneConnections.map { it.id }.toSet()
+            val assignedIds = plan.phases.flatMap { it.greenConnectionIds }
+            if (plan.phases.map { it.id }.distinct().size != plan.phases.size) add("Идентификаторы светофорных фаз должны быть уникальными")
+            plan.phases.forEach { phase ->
+                if (phase.name.isBlank()) add("У светофорной фазы отсутствует название")
+                if (phase.greenSeconds <= 0) add("Длительность зелёного сигнала должна быть положительной")
+                if (phase.yellowSeconds < 0 || phase.allRedSeconds < 0) add("Интервалы жёлтого и общего красного не могут быть отрицательными")
+                if (phase.greenConnectionIds.isEmpty()) add("Фаза «${phase.name}» не содержит разрешённых движений")
+                if (phase.greenConnectionIds.any { it !in connectionIds }) add("Фаза «${phase.name}» ссылается на несуществующую связь полос")
+            }
+            if (assignedIds.size != assignedIds.distinct().size) add("Одно движение назначено зелёным сразу в нескольких фазах")
         }
         if (intersection.safetyIslands.map { it.id }.distinct().size != intersection.safetyIslands.size) {
             add("Идентификаторы островков безопасности должны быть уникальными")
