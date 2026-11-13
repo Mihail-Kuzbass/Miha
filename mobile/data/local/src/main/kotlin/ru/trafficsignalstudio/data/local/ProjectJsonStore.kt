@@ -15,6 +15,8 @@ import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.RoadNetwork
 import ru.trafficsignalstudio.model.RoadSegment
 import ru.trafficsignalstudio.model.RoadSegmentKind
+import ru.trafficsignalstudio.model.RoadSegmentLane
+import ru.trafficsignalstudio.model.LaneTravelDirection
 import ru.trafficsignalstudio.model.RoadJunctionNode
 import ru.trafficsignalstudio.model.SafetyIsland
 import java.io.File
@@ -82,6 +84,17 @@ class ProjectJsonStore(context: Context) {
                                     put("name", segment.name)
                                     put("widthMeters", segment.widthMeters)
                                     put("laneCount", segment.laneCount)
+                                    put("lanes", JSONArray().apply {
+                                        segment.lanes.forEach { lane ->
+                                            put(JSONObject().apply {
+                                                put("id", lane.id)
+                                                put("index", lane.index)
+                                                put("widthMeters", lane.widthMeters)
+                                                put("travelDirection", lane.travelDirection.name)
+                                                put("allowedMovements", JSONArray(lane.allowedMovements.map { it.name }))
+                                            })
+                                        }
+                                    })
                                     put("elevationLevel", segment.elevationLevel)
                                     put("isRamp", segment.isRamp)
                                     put("kind", segment.kind.name)
@@ -174,6 +187,22 @@ class ProjectJsonStore(context: Context) {
                     val point = pointsJson.getJSONObject(pointIndex)
                     Point2D(point.optDouble("x"), point.optDouble("y"))
                 }
+                val roadLanesJson = segmentJson.optJSONArray("lanes") ?: JSONArray()
+                val roadLanes = (0 until roadLanesJson.length()).mapNotNull { laneIndex ->
+                    val laneJson = roadLanesJson.optJSONObject(laneIndex) ?: return@mapNotNull null
+                    val allowed = laneJson.optJSONArray("allowedMovements") ?: JSONArray()
+                    RoadSegmentLane(
+                        id = laneJson.optString("id"),
+                        index = laneJson.optInt("index", laneIndex + 1),
+                        widthMeters = laneJson.optDouble("widthMeters", 3.5),
+                        travelDirection = runCatching {
+                            LaneTravelDirection.valueOf(laneJson.optString("travelDirection"))
+                        }.getOrDefault(LaneTravelDirection.ALONG_CENTERLINE),
+                        allowedMovements = (0 until allowed.length())
+                            .mapNotNull { runCatching { MovementKind.valueOf(allowed.getString(it)) }.getOrNull() }
+                            .toSet().ifEmpty { setOf(MovementKind.THROUGH) }
+                    )
+                }
                 RoadSegment(
                     id = segmentJson.optString("id"),
                     name = segmentJson.optString("name"),
@@ -184,7 +213,8 @@ class ProjectJsonStore(context: Context) {
                     isRamp = segmentJson.optBoolean("isRamp", false),
                     kind = runCatching { RoadSegmentKind.valueOf(segmentJson.optString("kind")) }
                         .getOrDefault(if (segmentJson.optBoolean("isRamp", false)) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE),
-                    arcRadiusMeters = if (segmentJson.has("arcRadiusMeters")) segmentJson.optDouble("arcRadiusMeters") else null
+                    arcRadiusMeters = if (segmentJson.has("arcRadiusMeters")) segmentJson.optDouble("arcRadiusMeters") else null,
+                    lanes = roadLanes
                 )
             }
             val nodesJson = item.optJSONArray("junctionNodes") ?: JSONArray()
