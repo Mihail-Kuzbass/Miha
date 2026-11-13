@@ -8,6 +8,7 @@ import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.IntersectionType
 import ru.trafficsignalstudio.model.Lane
 import ru.trafficsignalstudio.model.LaneFlowDirection
+import ru.trafficsignalstudio.model.LaneConnection
 import ru.trafficsignalstudio.model.MovementKind
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.ProjectDocument
@@ -111,6 +112,17 @@ class ProjectJsonStore(context: Context) {
                                 })
                             }
                         })
+                        put("laneConnections", JSONArray().apply {
+                            intersection.laneConnections.forEach { connection ->
+                                put(JSONObject().apply {
+                                    put("id", connection.id)
+                                    put("fromApproachId", connection.fromApproachId)
+                                    put("fromLaneId", connection.fromLaneId)
+                                    put("toApproachId", connection.toApproachId)
+                                    put("toLaneId", connection.toLaneId)
+                                })
+                            }
+                        })
                     })
                 }
             }
@@ -199,6 +211,17 @@ class ProjectJsonStore(context: Context) {
                     }
                 )
             }
+            val connectionsJson = item.optJSONArray("laneConnections") ?: JSONArray()
+            val connections = (0 until connectionsJson.length()).mapNotNull { connectionIndex ->
+                val connection = connectionsJson.optJSONObject(connectionIndex) ?: return@mapNotNull null
+                LaneConnection(
+                    id = connection.optString("id"),
+                    fromApproachId = connection.optString("fromApproachId"),
+                    fromLaneId = connection.optString("fromLaneId"),
+                    toApproachId = connection.optString("toApproachId"),
+                    toLaneId = connection.optString("toLaneId")
+                )
+            }
             Intersection(
                 id = item.optString("id"),
                 name = item.optString("name"),
@@ -208,7 +231,8 @@ class ProjectJsonStore(context: Context) {
                 approaches = approaches,
                 roadSegments = segments,
                 junctionNodes = nodes,
-                safetyIslands = islands
+                safetyIslands = islands,
+                laneConnections = connections
             )
         }
         return ProjectDocument(
