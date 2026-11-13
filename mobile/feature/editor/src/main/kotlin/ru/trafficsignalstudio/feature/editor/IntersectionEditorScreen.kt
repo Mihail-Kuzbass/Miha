@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import ru.trafficsignalstudio.geometry.IntersectionGeometryEditor
 import ru.trafficsignalstudio.model.Intersection
@@ -262,7 +263,7 @@ private fun IntersectionGeometryPreview(
 
             // Local geometry points north; rotating it supports any approach
             // azimuth, not just the four cardinal directions.
-            androidx.compose.ui.graphics.drawscope.rotate(heading.toFloat(), center) {
+            rotate(heading.toFloat(), center) {
                 drawRect(Color(0xFF59616A), Offset(center.x - half, 0f),
                     Size(roadWidth, center.y))
                 laneDividerOffsets.forEach { offset ->
@@ -277,9 +278,9 @@ private fun IntersectionGeometryPreview(
         }
 
         if (intersection.type == ru.trafficsignalstudio.model.IntersectionType.ROUNDABOUT) {
-            val radius = junctionHalf * 0.82f
+            val radius = max(junctionHalf * 0.82f, 34f)
             drawCircle(Color(0xFF59616A), radius = radius + 17f, center = center)
-            drawCircle(Color(0xFFE8EEE8), radius = radius - 15f, center = center)
+            drawCircle(Color(0xFFE8EEE8), radius = max(radius - 15f, 2f), center = center)
             drawCircle(Color.White, radius = radius + 1f, center = center,
                 style = Stroke(width = 2f, pathEffect = dash))
         } else if (intersection.roadSegments.isEmpty()) {
