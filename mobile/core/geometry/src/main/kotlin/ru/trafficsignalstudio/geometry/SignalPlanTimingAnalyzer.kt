@@ -1,0 +1,89 @@
+package ru.trafficsignalstudio.geometry
+
+import ru.trafficsignalstudio.model.Intersection
+
+enum class SignalPlanIssueCode {
+    NO_SIGNAL_PLAN, PLAN_DISABLED, NO_PHASES, DUPLICATE_PHASE_ID, EMPTY_PHASE,
+    INVALID_GREEN_DURATION, INVALID_YELLOW_DURATION, INVALID_ALL_RED_DURATION,
+    UNKNOWN_CONNECTION, CONNECTION_ASSIGNED_MULTIPLE_PHASES, UNASSIGNED_CONNECTION
+}
+
+data class SignalPlanDiagnostic(
+    val code: SignalPlanIssueCode,
+    val message: String,
+    val phaseId: String? = null,
+    val connectionId: String? = null
+)
+
+data class SignalPhaseWindow(
+    val phaseId: String, val phaseName: String,
+    val startSeconds: Int, val greenEndSeconds: Int,
+    val yellowEndSeconds: Int, val allRedEndSeconds: Int
+)
+
+data class SignalPlanTimingReport(
+    val cycleLengthSeconds: Int,
+    val phaseWindows: List<SignalPhaseWindow>,
+    val diagnostics: List<SignalPlanDiagnostic>
+) {
+    val isValid: Boolean get() = diagnostics.none {
+        it.code == SignalPlanIssueCode.NO_SIGNAL_PLAN ||
+            it.code == SignalPlanIssueCode.NO_PHASES ||
+            it.code == SignalPlanIssueCode.DUPLICATE_PHASE_ID ||
+            it.code == SignalPlanIssueCode.EMPTY_PHASE ||
+            it.code == SignalPlanIssueCode.INVALID_GREEN_DURATION ||
+            it.code == SignalPlanIssueCode.INVALID_YELLOW_DURATION ||
+            it.code == SignalPlanIssueCode.INVALID_ALL_RED_DURATION ||
+            it.code == SignalPlanIssueCode.UNKNOWN_CONNECTION ||
+            it.code == SignalPlanIssueCode.CONNECTION_ASSIGNED_MULTIPLE_PHASES
+    }
+}
+
+/** Sequential cycle arithmetic; configured yellow and all-red are clearance intervals, not normative timings. */
+object SignalPlanTimingAnalyzer {
+    fun analyze(intersection: Intersection): SignalPlanTimingReport {
+        val plan = intersection.signalPlan ?: return SignalPlanTimingReport(0, emptyList(), listOf(
+            SignalPlanDiagnostic(SignalPlanIssueCode.NO_SIGNAL_PLAN, "Светофорный план не задан")
+        ))
+        val diagnostics = mutableListOf<SignalPlanDiagnostic>()
+        if (!plan.enabled) diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.PLAN_DISABLED, "Светофорный план отключён")
+        if (plan.phases.isEmpty()) diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.NO_PHASES, "В плане отсутствуют фазы")
+        plan.phases.groupBy { it.id }.filterValues { it.size > 1 }.keys.forEach { id ->
+            diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.DUPLICATE_PHASE_ID, "Повторяется идентификатор фазы: " + id, phaseId = id)
+        }
+        val known = intersection.laneConnections.map { it.id }.toSet()
+        val assignments = mutableMapOf<String, MutableList<String>>()
+        val windows = mutableListOf<SignalPhaseWindow>()
+        var cursor = 0
+        plan.phases.forEach { phase ->
+            if (phase.greenConnectionIds.isEmpty()) diagnostics += SignalPlanDiagnostic(
+                SignalPlanIssueCode.EMPTY_PHASE, "Фаза «" + phase.name + "» не содержит разрешённых движений", phaseId = phase.id)
+            if (phase.greenSeconds <= 0) diagnostics += SignalPlanDiagnostic(
+                SignalPlanIssueCode.INVALID_GREEN_DURATION, "Зелёный интервал должен быть больше нуля", phaseId = phase.id)
+            if (phase.yellowSeconds < 0) diagnostics += SignalPlanDiagnostic(
+                SignalPlanIssueCode.INVALID_YELLOW_DURATION, "Жёлтый интервал не может быть отрицательным", phaseId = phase.id)
+            if (phase.allRedSeconds < 0) diagnostics += SignalPlanDiagnostic(
+                SignalPlanIssueCode.INVALID_ALL_RED_DURATION, "Общий красный интервал не может быть отрицательным", phaseId = phase.id)
+            phase.greenConnectionIds.forEach { id ->
+                assignments.getOrPut(id) { mutableListOf() }.add(phase.id)
+                if (id !in known) diagnostics += SignalPlanDiagnostic(
+                    SignalPlanIssueCode.UNKNOWN_CONNECTION, "Фаза «" + phase.name + "» ссылается на отсутствующее движение",
+                    phaseId = phase.id, connectionId = id)
+            }
+            val greenEnd = cursor + phase.greenSeconds.coerceAtLeast(0)
+            val yellowEnd = greenEnd + phase.yellowSeconds.coerceAtLeast(0)
+            val allRedEnd = yellowEnd + phase.allRedSeconds.coerceAtLeast(0)
+            windows += SignalPhaseWindow(phase.id, phase.name, cursor, greenEnd, yellowEnd, allRedEnd)
+            cursor = allRedEnd
+        }
+        assignments.filterValues { it.size > 1 }.keys.forEach { id ->
+            diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.CONNECTION_ASSIGNED_MULTIPLE_PHASES,
+                "Одно движение назначено более чем в одну фазу", connectionId = id)
+        }
+        known.filter { it !in assignments }.forEach { id ->
+            diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.UNASSIGNED_CONNECTION,
+                "Для движения не назначена ни одна фаза", connectionId = id)
+        }
+        return SignalPlanTimingReport(cursor, windows, diagnostics)
+    }
+}
