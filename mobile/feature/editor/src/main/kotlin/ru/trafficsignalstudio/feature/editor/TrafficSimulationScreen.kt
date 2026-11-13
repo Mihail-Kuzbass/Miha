@@ -463,7 +463,7 @@ private fun pointAtProgress(points: List<ru.trafficsignalstudio.model.Point2D>, 
         )
     }
     for (index in lengths.indices) {
-        if (distance <= lengths[index] || index == lengths.lastIndex) {
+        if (distance <= lengths[index]) {
             val ratio = (distance / lengths[index].coerceAtLeast(1e-6)).coerceIn(0.0, 1.0)
             val a = points[index]; val b = points[index + 1]
             return ru.trafficsignalstudio.model.Point2D(
@@ -473,7 +473,14 @@ private fun pointAtProgress(points: List<ru.trafficsignalstudio.model.Point2D>, 
         }
         distance -= lengths[index]
     }
-    return points.last()
+    val last = points.last()
+    val previous = points[points.lastIndex - 1]
+    val lastSegment = lengths.last().coerceAtLeast(1e-6)
+    val extensionRatio = distance / lastSegment
+    return ru.trafficsignalstudio.model.Point2D(
+        last.xMeters + (last.xMeters - previous.xMeters) * extensionRatio,
+        last.yMeters + (last.yMeters - previous.yMeters) * extensionRatio
+    )
 }
 
 private fun VehicleClass.displayName(): String = when (this) {
