@@ -173,9 +173,10 @@ object TrajectoryConflictAnalyzer {
         val incomingHeading = normalizeDegrees(from.headingDegrees + 180.0)
         val delta = signedAngle(incomingHeading, normalizeDegrees(to.headingDegrees))
         return when {
-            abs(delta) >= 150.0 -> MovementKind.THROUGH
-            delta > 0.0 -> if (delta > 145.0) MovementKind.U_TURN else MovementKind.RIGHT
-            else -> if (delta < -145.0) MovementKind.U_TURN else MovementKind.LEFT
+            abs(delta) <= 30.0 -> MovementKind.THROUGH
+            abs(delta) >= 150.0 -> MovementKind.U_TURN
+            delta > 0.0 -> MovementKind.RIGHT
+            else -> MovementKind.LEFT
         }
     }
 
