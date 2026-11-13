@@ -33,6 +33,17 @@ class CrashRiskAnalyzerTest {
         assertTrue(assessment.riskPercent in 0.0..9.9)
     }
 
+    @Test fun riskBandsUseRequestedInclusiveThresholds() {
+        assertEquals(CrashRiskBand.NO_CRASH, CrashRiskAnalyzer.bandForRisk(0.0))
+        assertEquals(CrashRiskBand.NO_CRASH, CrashRiskAnalyzer.bandForRisk(4.999))
+        assertEquals(CrashRiskBand.FOLLOWING_DISTANCE, CrashRiskAnalyzer.bandForRisk(5.0))
+        assertEquals(CrashRiskBand.FOLLOWING_DISTANCE, CrashRiskAnalyzer.bandForRisk(19.999))
+        assertEquals(CrashRiskBand.INTERSECTION_CONFLICT, CrashRiskAnalyzer.bandForRisk(20.0))
+        assertEquals(CrashRiskBand.INTERSECTION_CONFLICT, CrashRiskAnalyzer.bandForRisk(49.999))
+        assertEquals(CrashRiskBand.MULTI_VEHICLE, CrashRiskAnalyzer.bandForRisk(50.0))
+        assertEquals(CrashRiskBand.MULTI_VEHICLE, CrashRiskAnalyzer.bandForRisk(100.0))
+    }
+
     @Test fun riskGrowsWithDemand() {
         val intersection = simpleIntersection()
         val low = CrashRiskAnalyzer.assess(intersection, TrafficSimulationDemand(

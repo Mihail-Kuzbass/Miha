@@ -324,22 +324,27 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                     Text("Оценка риска ДТП", style = MaterialTheme.typography.titleMedium)
                     Text("${"%.1f".format(simulation.crashRiskPercent)}%", style = MaterialTheme.typography.headlineMedium,
                         color = when (simulation.crashRiskBand) {
-                            ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> Color(0xFF43A047)
+                            ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH -> Color(0xFF43A047)
+                            ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> Color(0xFFFFC107)
                             ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> Color(0xFFFFA726)
                             ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> Color(0xFFE53935)
                         })
                     Text(when (simulation.crashRiskBand) {
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> "0–10%: риск столкновения из-за несоблюдения дистанции"
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> "10–40%: риск столкновения 2–3 автомобилей в конфликтной зоне"
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> "40% и выше: риск ДТП с 1–10 участниками на перекрёстке"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH -> "0–5%: ДТП не происходит"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> "5–20%: столкновение из-за несоблюдения дистанции"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> "20–50%: столкновение 2–3 автомобилей в конфликтной зоне"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> "50% и выше: групповое столкновение или до 2 ДТП за час симуляции"
                     }, style = MaterialTheme.typography.bodySmall)
                     MetricLine("Геометрических конфликтов", "${simulation.geometricConflictCount}")
                     MetricLine("Смоделировано ДТП", "${simulation.crashIncidents.size}")
+                    if (simulation.crashRiskBand == ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH) {
+                        Text("При текущем уровне риска аварийные события отключены.", style = MaterialTheme.typography.labelSmall)
+                    }
                     MetricLine("Участников ДТП", "${simulation.crashIncidents.sumOf { it.participants }}")
                     simulation.crashIncidents.forEach { incident ->
                         MetricLine("ДТП ${incident.id}", "${incident.participants} ТС · ${incident.timeSeconds.toInt()} с · устранение через ${(incident.clearedAtSeconds - incident.timeSeconds).toInt()} с")
                     }
-                    Text("Процент — сценарный индикатор риска по интенсивности и конфликтам траекторий, а не статистически откалиброванная вероятность для реальной улицы. Само ДТП в прогоне возникает случайно с учётом этого индикатора.", style = MaterialTheme.typography.labelSmall)
+                    Text("Процент — сценарный индикатор риска по интенсивности и конфликтам траекторий, а не статистически откалиброванная вероятность для реальной улицы. При риске ниже 5% ДТП отключены; при риске от 50% моделируется до двух аварийных событий за каждый час.", style = MaterialTheme.typography.labelSmall)
                 }
             }
             Card(modifier = Modifier.fillMaxWidth()) {

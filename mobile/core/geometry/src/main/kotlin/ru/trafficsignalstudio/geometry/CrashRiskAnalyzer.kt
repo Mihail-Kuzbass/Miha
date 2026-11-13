@@ -2,7 +2,7 @@ package ru.trafficsignalstudio.geometry
 
 import ru.trafficsignalstudio.model.Intersection
 
-enum class CrashRiskBand { FOLLOWING_DISTANCE, INTERSECTION_CONFLICT, MULTI_VEHICLE }
+enum class CrashRiskBand { NO_CRASH, FOLLOWING_DISTANCE, INTERSECTION_CONFLICT, MULTI_VEHICLE }
 
 data class CrashRiskAssessment(
     val riskPercent: Double,
@@ -14,6 +14,13 @@ data class CrashRiskAssessment(
 
 /** Transparent scenario-risk indicator, not a calibrated real-world crash prediction. */
 object CrashRiskAnalyzer {
+    fun bandForRisk(riskPercent: Double): CrashRiskBand = when {
+        riskPercent < 5.0 -> CrashRiskBand.NO_CRASH
+        riskPercent < 20.0 -> CrashRiskBand.FOLLOWING_DISTANCE
+        riskPercent < 50.0 -> CrashRiskBand.INTERSECTION_CONFLICT
+        else -> CrashRiskBand.MULTI_VEHICLE
+    }
+
     fun assess(intersection: Intersection, demand: TrafficSimulationDemand): CrashRiskAssessment {
         val conflicts = TrajectoryConflictAnalyzer.analyzeMovementConflicts(intersection)
         val flow = demand.movements.sumOf { it.totalVehiclesPerHour }.coerceAtLeast(0.0)
@@ -27,11 +34,7 @@ object CrashRiskAnalyzer {
             }
         }
         val risk = (flowComponent + conflictComponent).coerceIn(0.0, 100.0)
-        val band = when {
-            risk < 10.0 -> CrashRiskBand.FOLLOWING_DISTANCE
-            risk < 40.0 -> CrashRiskBand.INTERSECTION_CONFLICT
-            else -> CrashRiskBand.MULTI_VEHICLE
-        }
+        val band = bandForRisk(risk)
         return CrashRiskAssessment(risk, conflicts.size, flow, band, conflicts)
     }
 }

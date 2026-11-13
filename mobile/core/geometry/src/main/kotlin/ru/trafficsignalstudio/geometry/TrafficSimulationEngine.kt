@@ -271,11 +271,29 @@ object TrafficSimulationEngine {
         val seed = intersection.id.hashCode().toLong() xor demand.durationSeconds.toLong() xor
             demand.movements.sumOf { (it.totalVehiclesPerHour * 10.0).toLong() }
         val random = Random(seed)
-        val runHours = demand.durationSeconds / 3600.0
-        val eventProbability = if (riskAssessment.riskPercent <= 0.0) 0.0 else
-            1.0 - (1.0 - riskAssessment.riskPercent / 100.0).coerceIn(0.0, 1.0).pow(runHours)
-        val scheduledIncidentTime = if (random.nextDouble() < eventProbability)
-            random.nextDouble() * demand.durationSeconds else null
+        val scheduledIncidentTimes = mutableListOf<Double>()
+        if (riskAssessment.band == CrashRiskBand.MULTI_VEHICLE) {
+            // High-risk mode permits up to two independently triggered incidents per simulated hour.
+            val hourCount = kotlin.math.ceil(demand.durationSeconds / 3600.0).toInt()
+            repeat(hourCount) { hour ->
+                repeat(2) { slot ->
+                    val slotStart = hour * 3600.0 + slot * 1800.0
+                    val slotEnd = minOf(demand.durationSeconds.toDouble(), slotStart + 1800.0)
+                    if (slotStart < demand.durationSeconds && random.nextDouble() < riskAssessment.riskPercent / 100.0) {
+                        scheduledIncidentTimes += random.nextDouble(slotStart, slotEnd.coerceAtLeast(slotStart + 1.0))
+                    }
+                }
+            }
+        } else if (riskAssessment.band != CrashRiskBand.NO_CRASH) {
+            val runHours = demand.durationSeconds / 3600.0
+            val eventProbability = 1.0 - (1.0 - riskAssessment.riskPercent / 100.0)
+                .coerceIn(0.0, 1.0).pow(runHours)
+            if (random.nextDouble() < eventProbability) {
+                scheduledIncidentTimes += random.nextDouble() * demand.durationSeconds
+            }
+        }
+        scheduledIncidentTimes.sort()
+        var nextScheduledIncidentIndex = 0
 
         fun isBlocked(connectionId: String, atSeconds: Double): Boolean =
             (blockedUntilByConnection[connectionId] ?: 0.0) > atSeconds
@@ -330,11 +348,13 @@ object TrafficSimulationEngine {
         }
 
         fun tryCreateIncident() {
-            if (scheduledIncidentTime == null || time + 1e-9 < scheduledIncidentTime || incidents.isNotEmpty()) return
+            val scheduledTime = scheduledIncidentTimes.getOrNull(nextScheduledIncidentIndex) ?: return
+            if (time + 1e-9 < scheduledTime) return
             val selected: List<Pair<MovementState, VehicleAgent>>
             val incidentPoint: Point2D
             val affected: Set<String>
             when (riskAssessment.band) {
+                CrashRiskBand.NO_CRASH -> return
                 CrashRiskBand.FOLLOWING_DISTANCE -> {
                     val pair = laneGroups.values.firstNotNullOfOrNull { group ->
                         val candidates = group.flatMap { state ->
@@ -383,10 +403,12 @@ object TrafficSimulationEngine {
             }
             affected.forEach { id -> blockedUntilByConnection[id] = clearedAt }
             incidents += CrashIncident(incidentId, time, clearedAt, riskAssessment.band, selected.size, affected, incidentPoint)
+            nextScheduledIncidentIndex++
             diagnostics += when (riskAssessment.band) {
+                CrashRiskBand.NO_CRASH -> ""
                 CrashRiskBand.FOLLOWING_DISTANCE -> "Смоделировано ДТП из-за несоблюдения дистанции; полоса временно заблокирована."
                 CrashRiskBand.INTERSECTION_CONFLICT -> "Смоделировано столкновение 2–3 автомобилей в конфликтной зоне перекрёстка."
-                CrashRiskBand.MULTI_VEHICLE -> "Смоделировано ДТП на перекрёстке с числом участников до 10; движение по затронутым траекториям ограничено."
+                CrashRiskBand.MULTI_VEHICLE -> "Смоделировано групповое столкновение (до 10 участников); движение по затронутым траекториям ограничено."
             }
         }
 
