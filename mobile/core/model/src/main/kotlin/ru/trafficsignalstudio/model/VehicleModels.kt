@@ -142,7 +142,6 @@ object VehicleModelCatalog {
             minimumTurningRadiusMeters = 2.8, maximumSpeedKmh = 120.0,
             accelerationMetersPerSecondSquared = 2.5, serviceDecelerationMetersPerSecondSquared = 4.0,
             frontOverhangMeters = 0.35, rearOverhangMeters = 0.35,
-            minimumGapMeters = 1.0, desiredTimeHeadwaySeconds = 1.4,
             minimumGapMeters = 1.2, desiredTimeHeadwaySeconds = 1.0
         ),
         VehicleModel(
@@ -150,7 +149,8 @@ object VehicleModelCatalog {
             lengthMeters = 1.8, widthMeters = 0.65, heightMeters = 1.1, wheelbaseMeters = 1.1,
             minimumTurningRadiusMeters = 1.5, maximumSpeedKmh = 35.0,
             accelerationMetersPerSecondSquared = 0.8, serviceDecelerationMetersPerSecondSquared = 2.0,
-            frontOverhangMeters = 0.35, rearOverhangMeters = 0.35
+            frontOverhangMeters = 0.35, rearOverhangMeters = 0.35,
+            minimumGapMeters = 1.0, desiredTimeHeadwaySeconds = 1.4
         )
     )
 
