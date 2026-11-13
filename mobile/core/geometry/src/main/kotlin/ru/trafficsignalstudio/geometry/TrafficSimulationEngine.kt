@@ -450,7 +450,37 @@ object TrafficSimulationEngine {
                             widthMeters = vehicle.waiting.model.widthMeters
                         )
                     }
+                }.toMutableList()
+
+                // Render the upstream spillback as a physically spaced queue beyond
+                // the finite approach-storage boundary, rather than only showing a count.
+                laneGroups.values.forEach { group ->
+                    val tailRear = group.flatMap { it.vehicles }
+                        .filter { it.positionMeters <= 0.0 }
+                        .minOfOrNull { it.positionMeters - it.waiting.model.lengthMeters }
+                        ?: -demand.approachStorageLengthMeters
+                    var nextFront = tailRear - demand.minimumGapMeters
+                    val pending = group.flatMap { state ->
+                        state.pending.map { waiting -> state to waiting }
+                    }.sortedBy { it.second.arrivalTime }
+                    pending.forEachIndexed { index, (state, waiting) ->
+                        val centerPosition = nextFront - waiting.model.lengthMeters / 2.0
+                        visible += SimulatedVehicle(
+                            id = waiting.id,
+                            connectionId = state.connectionId,
+                            vehicleClass = waiting.vehicleClass,
+                            progress = centerPosition / state.pathLengthMeters,
+                            queued = true,
+                            queueIndex = index,
+                            positionMeters = nextFront,
+                            speedMetersPerSecond = 0.0,
+                            lengthMeters = waiting.model.lengthMeters,
+                            widthMeters = waiting.model.widthMeters
+                        )
+                        nextFront -= waiting.model.lengthMeters + waiting.model.minimumGapMeters
+                    }
                 }
+
                 snapshots += TrafficSimulationSnapshot(
                     timeSeconds = time,
                     activeVehicles = visible.take(500),
