@@ -130,4 +130,60 @@ class TrafficSimulationEngineTest {
     fun rejectsClassFlowsAboveTotalFlow() {
         MovementTrafficDemand("m1", 100.0, mapOf(VehicleClass.CITY_BUS to 120.0))
     }
+
+    @Test fun visualVehicleEnvelopeContactCreatesCrashEvenWithoutRiskTriggeredEvent() {
+        fun lane(id: String, flow: LaneFlowDirection) = Lane(
+            id = id,
+            index = 0,
+            flowDirection = flow,
+            allowedMovements = if (flow == LaneFlowDirection.INTO_INTERSECTION)
+                setOf(MovementKind.THROUGH) else emptySet()
+        )
+        val approaches = listOf(
+            Approach(id = "north", name = "Север", headingDegrees = 0.0,
+                lanes = listOf(lane("north-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("north-out", LaneFlowDirection.OUT_OF_INTERSECTION))),
+            Approach(id = "south", name = "Юг", headingDegrees = 180.0,
+                lanes = listOf(lane("south-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("south-out", LaneFlowDirection.OUT_OF_INTERSECTION))),
+            Approach(id = "east", name = "Восток", headingDegrees = 90.0,
+                lanes = listOf(lane("east-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("east-out", LaneFlowDirection.OUT_OF_INTERSECTION))),
+            Approach(id = "west", name = "Запад", headingDegrees = 270.0,
+                lanes = listOf(lane("west-in", LaneFlowDirection.INTO_INTERSECTION),
+                    lane("west-out", LaneFlowDirection.OUT_OF_INTERSECTION)))
+        )
+        val connections = listOf(
+            LaneConnection("north-south", "north", "north-in", "south", "south-out"),
+            LaneConnection("south-north", "south", "south-in", "north", "north-out"),
+            LaneConnection("east-west", "east", "east-in", "west", "west-out"),
+            LaneConnection("west-east", "west", "west-in", "east", "east-out")
+        )
+        val intersection = Intersection(
+            name = "Перекрёсток с пересекающимися потоками",
+            type = IntersectionType.CUSTOM,
+            approaches = approaches,
+            laneConnections = connections,
+            signalPlan = SignalPlan(phases = listOf(
+                SignalPhase(
+                    id = "all-green",
+                    name = "Тестовый конфликт",
+                    greenConnectionIds = connections.map { it.id }.toSet(),
+                    greenSeconds = 55,
+                    yellowSeconds = 3,
+                    allRedSeconds = 2
+                )
+            ))
+        )
+        val result = TrafficSimulationEngine.run(intersection, TrafficSimulationDemand(
+            movements = connections.map { MovementTrafficDemand(it.id, 60.0) },
+            durationSeconds = 180,
+            approachStorageLengthMeters = 40.0,
+            approachSpeedKmh = 50.0
+        ))
+        assertTrue(
+            "Actual overlap of rendered vehicle bodies must be recorded as a collision",
+            result.crashIncidents.any { it.cause == CrashIncidentCause.PHYSICAL_CONTACT }
+        )
+    }
 }
