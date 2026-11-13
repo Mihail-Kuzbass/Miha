@@ -339,7 +339,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                             ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> Color(0xFFE53935)
                         })
                     Text(when (simulation.crashRiskBand) {
-                        ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH -> "0–<5%: ДТП не происходит"
+                        ru.trafficsignalstudio.geometry.CrashRiskBand.NO_CRASH -> "0–<5%: нет сценарных ДТП; фактические контакты фиксируются"
                         ru.trafficsignalstudio.geometry.CrashRiskBand.FOLLOWING_DISTANCE -> "5–<20%: столкновение из-за несоблюдения дистанции"
                         ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> "20–<50%: столкновение 2–3 автомобилей в конфликтной зоне"
                         ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> "≥50%: групповое столкновение или до 2 ДТП за час симуляции"
@@ -355,7 +355,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                             "Физическое соприкосновение" else "Сценарное событие"
                         MetricLine("ДТП ${incident.id}", "${causeLabel} · ${incident.participants} ТС · ${incident.timeSeconds.toInt()} с · устранение через ${(incident.clearedAtSeconds - incident.timeSeconds).toInt()} с")
                     }
-                    Text("Процент — сценарный индикатор риска по интенсивности и конфликтам траекторий, а не статистически откалиброванная вероятность для реальной улицы. При риске ниже 5% ДТП отключены; при риске от 50% моделируется до двух аварийных событий за каждый час.", style = MaterialTheme.typography.labelSmall)
+                    Text("Процент — сценарный индикатор риска по интенсивности и конфликтам траекторий, а не статистически откалиброванная вероятность для реальной улицы. При риске ниже 5% отключены сценарные ДТП, но фактические соприкосновения габаритов регистрируются; при риске от 50% моделируется до двух аварийных событий за каждый час.", style = MaterialTheme.typography.labelSmall)
                 }
             }
             Card(modifier = Modifier.fillMaxWidth()) {

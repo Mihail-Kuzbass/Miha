@@ -368,8 +368,8 @@ object TrafficSimulationEngine {
             val a = points[segmentIndex]
             val b = points[segmentIndex + 1]
             val segmentLength = lengths[segmentIndex].coerceAtLeast(1e-6)
-            val ratio = if (progress < 0.0) distanceAlong / segmentLength
-                else (distanceAlong / segmentLength).coerceIn(0.0, 1.0)
+            val ratio = if (progress < 0.0 || distanceAlong > segmentLength)
+                distanceAlong / segmentLength else (distanceAlong / segmentLength).coerceIn(0.0, 1.0)
             val dx = (b.xMeters - a.xMeters) / segmentLength
             val dy = (b.yMeters - a.yMeters) / segmentLength
             return Point2D(a.xMeters + (b.xMeters - a.xMeters) * ratio,
