@@ -46,6 +46,20 @@ enum class RoadSegmentKind {
     STRAIGHT, POLYLINE, ARC, BRIDGE, RAMP
 }
 
+enum class LaneTravelDirection {
+    ALONG_CENTERLINE,
+    AGAINST_CENTERLINE
+}
+
+/** A lane belonging to a freely drawn road segment. */
+data class RoadSegmentLane(
+    val id: String = UUID.randomUUID().toString(),
+    val index: Int,
+    val widthMeters: Double = 3.5,
+    val travelDirection: LaneTravelDirection = LaneTravelDirection.ALONG_CENTERLINE,
+    val allowedMovements: Set<MovementKind> = setOf(MovementKind.THROUGH)
+)
+
 data class RoadSegment(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -55,7 +69,9 @@ data class RoadSegment(
     val elevationLevel: Int = 0,
     val isRamp: Boolean = false,
     val kind: RoadSegmentKind = if (isRamp) RoadSegmentKind.RAMP else RoadSegmentKind.POLYLINE,
-    val arcRadiusMeters: Double? = null
+    val arcRadiusMeters: Double? = null,
+    /** Empty means a legacy segment; lane definitions are synthesized from laneCount/widthMeters. */
+    val lanes: List<RoadSegmentLane> = emptyList()
 )
 
 data class RoadJunctionNode(
@@ -104,7 +120,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 4
+        const val CURRENT_SCHEMA_VERSION = 5
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
