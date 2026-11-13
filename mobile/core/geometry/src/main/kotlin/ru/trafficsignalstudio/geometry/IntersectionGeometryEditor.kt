@@ -6,6 +6,9 @@ import ru.trafficsignalstudio.model.Lane
 import ru.trafficsignalstudio.model.LaneFlowDirection
 import ru.trafficsignalstudio.model.LaneConnection
 import ru.trafficsignalstudio.model.MovementKind
+import ru.trafficsignalstudio.model.RoadSegment
+import ru.trafficsignalstudio.model.RoadSegmentLane
+import ru.trafficsignalstudio.model.LaneTravelDirection
 
 /**
  * Pure geometry-editing operations. All dimensions are stored in metres;
@@ -116,6 +119,62 @@ object IntersectionGeometryEditor {
     fun removeLaneConnection(intersection: Intersection, connectionId: String): Intersection =
         intersection.copy(laneConnections = intersection.laneConnections.filterNot { it.id == connectionId })
 
+    /** Returns explicit lane definitions, synthesizing legacy lanes without mutating the project. */
+    fun effectiveRoadLanes(segment: RoadSegment): List<RoadSegmentLane> {
+        if (segment.lanes.isNotEmpty()) return segment.lanes.sortedBy { it.index }
+        val count = segment.laneCount.coerceIn(1, 16)
+        val laneWidth = segment.widthMeters / count
+        return (0 until count).map { index -> RoadSegmentLane(index = index + 1, widthMeters = laneWidth) }
+    }
+
+    fun setRoadLaneCount(intersection: Intersection, segmentId: String, count: Int): Intersection {
+        require(count in 1..16) { "Количество полос должно быть от 1 до 16" }
+        return intersection.copy(roadSegments = intersection.roadSegments.map { segment ->
+            if (segment.id != segmentId) segment else {
+                val old = effectiveRoadLanes(segment)
+                val resized = when {
+                    count <= old.size -> old.take(count).mapIndexed { i, lane -> lane.copy(index = i + 1) }
+                    else -> old + (old.size until count).map { i ->
+                        val template = old.lastOrNull()
+                        RoadSegmentLane(index = i + 1,
+                            widthMeters = template?.widthMeters ?: (segment.widthMeters / count),
+                            travelDirection = template?.travelDirection ?: LaneTravelDirection.ALONG_CENTERLINE,
+                            allowedMovements = template?.allowedMovements ?: setOf(MovementKind.THROUGH))
+                    }
+                }
+                segment.copy(laneCount = count, lanes = resized, widthMeters = resized.sumOf { it.widthMeters })
+            }
+        })
+    }
+
+    fun changeRoadLaneWidth(intersection: Intersection, segmentId: String, laneId: String, deltaMeters: Double): Intersection {
+        require(deltaMeters.isFinite())
+        return intersection.copy(roadSegments = intersection.roadSegments.map { segment ->
+            if (segment.id != segmentId) segment else {
+                val lanes = effectiveRoadLanes(segment).map { lane ->
+                    if (lane.id == laneId) lane.copy(widthMeters = (lane.widthMeters + deltaMeters).coerceIn(2.5, 5.0)) else lane
+                }
+                segment.copy(lanes = lanes, laneCount = lanes.size, widthMeters = lanes.sumOf { it.widthMeters })
+            }
+        })
+    }
+
+    fun setRoadLaneDirection(intersection: Intersection, segmentId: String, laneId: String, direction: LaneTravelDirection): Intersection =
+        intersection.copy(roadSegments = intersection.roadSegments.map { segment ->
+            if (segment.id != segmentId) segment else segment.copy(lanes = effectiveRoadLanes(segment).map { lane ->
+                if (lane.id == laneId) lane.copy(travelDirection = direction) else lane
+            })
+        })
+
+    fun setRoadLaneMovements(intersection: Intersection, segmentId: String, laneId: String, movements: Set<MovementKind>): Intersection {
+        require(movements.isNotEmpty()) { "Для полосы должно быть задано хотя бы одно направление" }
+        return intersection.copy(roadSegments = intersection.roadSegments.map { segment ->
+            if (segment.id != segmentId) segment else segment.copy(lanes = effectiveRoadLanes(segment).map { lane ->
+                if (lane.id == laneId) lane.copy(allowedMovements = movements) else lane
+            })
+        })
+    }
+
     fun validate(intersection: Intersection): List<String> = buildList {
         if (intersection.name.isBlank()) add("Не задано название перекрёстка")
         if (intersection.approaches.size < 2 && intersection.roadSegments.isEmpty()) {
@@ -162,6 +221,16 @@ object IntersectionGeometryEditor {
                 add("Некорректная ширина сегмента «${segment.name}»")
             }
             if (segment.laneCount !in 1..16) add("Некорректное количество полос сегмента «${segment.name}»")
+            if (segment.lanes.isNotEmpty()) {
+                if (segment.lanes.size != segment.laneCount) add("Количество индивидуальных полос не совпадает с параметром сегмента «${segment.name}»")
+                if (segment.lanes.map { it.id }.distinct().size != segment.lanes.size) add("Повторяются идентификаторы полос сегмента «${segment.name}»")
+                if (segment.lanes.map { it.index }.distinct().size != segment.lanes.size) add("Повторяются номера полос сегмента «${segment.name}»")
+                segment.lanes.forEach { lane ->
+                    if (!lane.widthMeters.isFinite() || lane.widthMeters !in 2.5..5.0) add("Некорректная ширина полосы ${lane.index} сегмента «${segment.name}»")
+                    if (lane.allowedMovements.isEmpty()) add("Для полосы ${lane.index} сегмента «${segment.name}» не заданы разрешённые манёвры")
+                }
+                if (kotlin.math.abs(segment.lanes.sumOf { it.widthMeters } - segment.widthMeters) > 0.05) add("Суммарная ширина полос не совпадает с шириной сегмента «${segment.name}»")
+            }
             val arcRadiusMeters = segment.arcRadiusMeters
             if (arcRadiusMeters != null && (!arcRadiusMeters.isFinite() || arcRadiusMeters <= 0.0)) {
                 add("Некорректный радиус дуги сегмента «${segment.name}»")
