@@ -1,6 +1,8 @@
 package ru.trafficsignalstudio.feature.editor
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,11 +22,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -37,7 +42,19 @@ import androidx.compose.ui.unit.dp
 import ru.trafficsignalstudio.geometry.IntersectionGeometryEditor
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.ProjectDocument
+import ru.trafficsignalstudio.model.Point2D
+import ru.trafficsignalstudio.model.RoadSegment
+import ru.trafficsignalstudio.model.RoadSegmentKind
 import kotlin.math.max
+import kotlin.math.min
+
+private enum class DrawingTool(val title: String, val kind: RoadSegmentKind) {
+    LINE("Линия", RoadSegmentKind.STRAIGHT),
+    FREE("Ломаная", RoadSegmentKind.POLYLINE),
+    ARC("Дуга", RoadSegmentKind.ARC),
+    BRIDGE("Мост", RoadSegmentKind.BRIDGE),
+    RAMP("Съезд", RoadSegmentKind.RAMP)
+}
 
 @Composable
 fun IntersectionEditorScreen(
@@ -48,6 +65,8 @@ fun IntersectionEditorScreen(
     onProjectChange: (ProjectDocument) -> Unit
 ) {
     var selectedApproachIndex by remember(intersection?.id) { mutableIntStateOf(0) }
+    var drawingTool by remember(intersection?.id) { mutableStateOf(DrawingTool.LINE) }
+    val pendingPoints = remember(intersection?.id) { mutableStateListOf<Point2D>() }
     val safeIndex = selectedApproachIndex.coerceIn(0, max(0, (intersection?.approaches?.size ?: 1) - 1))
     val selectedApproach = intersection?.approaches?.getOrNull(safeIndex)
     val validationErrors = intersection?.let(IntersectionGeometryEditor::validate).orEmpty()
@@ -86,7 +105,10 @@ fun IntersectionEditorScreen(
                 if (intersection != null) {
                     IntersectionGeometryPreview(
                         modifier = Modifier.fillMaxSize(),
-                        intersection = intersection
+                        intersection = intersection,
+                        pendingPoints = pendingPoints,
+                        drawingTool = drawingTool,
+                        onAddPoint = { point -> pendingPoints.add(point) }
                     )
                     Text(
                         text = intersection.name,
@@ -95,6 +117,59 @@ fun IntersectionEditorScreen(
                     )
                 } else {
                     Text("Нет геометрии перекрёстка", modifier = Modifier.align(Alignment.Center))
+                }
+            }
+        }
+
+        if (intersection != null) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Свободное рисование", style = MaterialTheme.typography.titleMedium)
+                    Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        DrawingTool.values().forEach { tool ->
+                            if (drawingTool == tool) {
+                                Button(onClick = { drawingTool = tool; pendingPoints.clear() }) { Text(tool.title) }
+                            } else {
+                                OutlinedButton(onClick = { drawingTool = tool; pendingPoints.clear() }) { Text(tool.title) }
+                            }
+                        }
+                    }
+                    Text("Точки: ${pendingPoints.size}. Нажимайте на поле, чтобы задать трассу.")
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { if (pendingPoints.isNotEmpty()) pendingPoints.removeAt(pendingPoints.lastIndex) },
+                            enabled = pendingPoints.isNotEmpty()) { Text("Отменить точку") }
+                        OutlinedButton(onClick = { pendingPoints.clear() }, enabled = pendingPoints.isNotEmpty()) {
+                            Text("Очистить")
+                        }
+                        Button(onClick = {
+                            if (pendingPoints.size >= 2) {
+                                val kind = drawingTool.kind
+                                val level = if (kind == RoadSegmentKind.BRIDGE) 1 else 0
+                                val segment = RoadSegment(
+                                    name = when (kind) {
+                                        RoadSegmentKind.STRAIGHT -> "Дорога ${intersection.roadSegments.size + 1}"
+                                        RoadSegmentKind.POLYLINE -> "Линия ${intersection.roadSegments.size + 1}"
+                                        RoadSegmentKind.ARC -> "Дуга ${intersection.roadSegments.size + 1}"
+                                        RoadSegmentKind.BRIDGE -> "Мост ${intersection.roadSegments.size + 1}"
+                                        RoadSegmentKind.RAMP -> "Съезд ${intersection.roadSegments.size + 1}"
+                                    },
+                                    centerline = pendingPoints.toList(),
+                                    widthMeters = if (kind == RoadSegmentKind.BRIDGE) 10.5 else 7.0,
+                                    laneCount = if (kind == RoadSegmentKind.BRIDGE) 3 else 2,
+                                    elevationLevel = level,
+                                    isRamp = kind == RoadSegmentKind.RAMP,
+                                    kind = kind
+                                )
+                                updateIntersection(intersection.copy(
+                                    type = ru.trafficsignalstudio.model.IntersectionType.CUSTOM,
+                                    roadSegments = intersection.roadSegments + segment
+                                ))
+                                pendingPoints.clear()
+                            }
+                        }, enabled = pendingPoints.size >= 2) { Text("Завершить линию") }
+                    }
+                    Text("Для дуги задайте 3 точки: начало, контрольную и конец. Мост рисуется на верхнем уровне.")
                 }
             }
         }
@@ -213,9 +288,23 @@ fun IntersectionEditorScreen(
 @Composable
 private fun IntersectionGeometryPreview(
     modifier: Modifier = Modifier,
-    intersection: Intersection
+    intersection: Intersection,
+    pendingPoints: List<Point2D>,
+    drawingTool: DrawingTool,
+    onAddPoint: (Point2D) -> Unit
 ) {
-    Canvas(modifier = modifier.background(Color(0xFFE8EEE8), RoundedCornerShape(12.dp))) {
+    Canvas(modifier = modifier
+        .background(Color(0xFFE8EEE8), RoundedCornerShape(12.dp))
+        .pointerInput(intersection.id, drawingTool) {
+            detectTapGestures { offset ->
+                val scale = size.minDimension * 0.28f / 14.0f * 0.35f
+                val safeScale = scale.coerceAtLeast(0.0001f)
+                onAddPoint(Point2D(
+                    xMeters = ((offset.x - size.width / 2f) / safeScale).toDouble(),
+                    yMeters = ((size.height / 2f - offset.y) / safeScale).toDouble()
+                ))
+            }
+        }) {
         val center = Offset(size.width / 2f, size.height / 2f)
         // Fixed scale keeps lane-count changes visible and gives custom layouts
         // a stable drawing coordinate system.
@@ -230,22 +319,32 @@ private fun IntersectionGeometryPreview(
         // visual metadata; conflict analysis will use it in a later engine step.
         intersection.roadSegments.sortedBy { it.elevationLevel }.forEach { segment ->
             if (segment.centerline.size >= 2) {
+                val screenPoints = segment.centerline.map { point ->
+                    Offset(center.x + point.xMeters.toFloat() * scale * 0.35f,
+                        center.y - point.yMeters.toFloat() * scale * 0.35f)
+                }
                 val path = Path().apply {
-                    val first = segment.centerline.first()
-                    moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f,
-                        center.y - first.yMeters.toFloat() * scale * 0.35f)
-                    segment.centerline.drop(1).forEach { point ->
-                        lineTo(center.x + point.xMeters.toFloat() * scale * 0.35f,
-                            center.y - point.yMeters.toFloat() * scale * 0.35f)
+                    moveTo(screenPoints.first().x, screenPoints.first().y)
+                    if (segment.kind == RoadSegmentKind.ARC && screenPoints.size >= 3) {
+                        quadraticTo(screenPoints[1].x, screenPoints[1].y,
+                            screenPoints.last().x, screenPoints.last().y)
+                    } else {
+                        screenPoints.drop(1).forEach { lineTo(it.x, it.y) }
                     }
                 }
                 val width = (segment.widthMeters.toFloat() * scale).coerceAtLeast(10f)
-                if (segment.elevationLevel > 0) {
+                val roundStroke = Stroke(width = width, cap = StrokeCap.Round,
+                    join = androidx.compose.ui.graphics.StrokeJoin.Round)
+                if (segment.elevationLevel > 0 || segment.kind == RoadSegmentKind.BRIDGE) {
                     drawPath(path, Color(0xFFB7BEC5),
-                        style = Stroke(width = width + 5f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                        style = Stroke(width = width + 9f, cap = StrokeCap.Round,
+                            join = androidx.compose.ui.graphics.StrokeJoin.Round))
                 }
-                drawPath(path, Color(0xFF59616A),
-                    style = Stroke(width = width, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                drawPath(path, Color(0xFF59616A), style = roundStroke)
+                if (segment.kind == RoadSegmentKind.BRIDGE) {
+                    drawPath(path, Color(0xFFE0E5E8),
+                        style = Stroke(width = 3f, cap = StrokeCap.Round))
+                }
                 if (segment.laneCount > 1) {
                     drawPath(path, Color.White.copy(alpha = 0.8f),
                         style = Stroke(width = 1.5f, pathEffect = dash, cap = StrokeCap.Round))
@@ -287,6 +386,27 @@ private fun IntersectionGeometryPreview(
             drawRect(Color(0xFF59616A),
                 topLeft = Offset(center.x - junctionHalf, center.y - junctionHalf),
                 size = Size(junctionHalf * 2f, junctionHalf * 2f))
+        }
+
+        if (pendingPoints.isNotEmpty()) {
+            val draft = Path().apply {
+                val first = pendingPoints.first()
+                moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f,
+                    center.y - first.yMeters.toFloat() * scale * 0.35f)
+                pendingPoints.drop(1).forEach { point ->
+                    lineTo(center.x + point.xMeters.toFloat() * scale * 0.35f,
+                        center.y - point.yMeters.toFloat() * scale * 0.35f)
+                }
+            }
+            drawPath(draft, Color(0xFF1976D2),
+                style = Stroke(width = 4f, cap = StrokeCap.Round,
+                    join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                    pathEffect = if (drawingTool == DrawingTool.ARC) dash else null))
+            pendingPoints.forEach { point ->
+                drawCircle(Color(0xFF1976D2), radius = 6f,
+                    center = Offset(center.x + point.xMeters.toFloat() * scale * 0.35f,
+                        center.y - point.yMeters.toFloat() * scale * 0.35f))
+            }
         }
 
         // A small center marker is retained for orientation while editing.
