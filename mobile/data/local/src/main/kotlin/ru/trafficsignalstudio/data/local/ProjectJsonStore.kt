@@ -153,7 +153,7 @@ class ProjectJsonStore(context: Context) {
             )
         }
         return ProjectDocument(
-            schemaVersion = json.optInt("schemaVersion", 1),
+            schemaVersion = ProjectDocument.CURRENT_SCHEMA_VERSION,
             id = json.getString("id"),
             name = json.optString("name", "Проект"),
             createdAtEpochMs = json.optLong("createdAtEpochMs"),
