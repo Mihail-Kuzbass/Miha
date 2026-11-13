@@ -452,16 +452,35 @@ object TrafficSimulationEngine {
         // Each geometric crossing becomes a time-domain reservation zone.
         // A vehicle owns the zone from its front entering the clearance envelope
         // until its rear has completely cleared it.
-        val conflictZones = movementConflicts.mapNotNull { conflict ->
-            val first = trajectories[conflict.firstConnectionId] ?: return@mapNotNull null
-            val second = trajectories[conflict.secondConnectionId] ?: return@mapNotNull null
-            ConflictZone(
+        val conflictZoneCandidates = mutableListOf<ConflictZone>()
+        movementConflicts.forEach { conflict ->
+            val first = trajectories[conflict.firstConnectionId] ?: return@forEach
+            val second = trajectories[conflict.secondConnectionId] ?: return@forEach
+            conflictZoneCandidates += ConflictZone(
                 conflict.firstConnectionId,
                 conflict.secondConnectionId,
                 distanceAlongPath(first.points, conflict.point),
                 distanceAlongPath(second.points, conflict.point),
                 conflict.point
             )
+        }
+        // Include swept-envelope near-conflicts as well as exact centreline
+        // intersections, so wide vehicles and close parallel/merging paths are
+        // protected by the same reservation mechanism.
+        VehicleEnvelopeConflictAnalyzer.analyze(trajectories.values.toList()).forEach { conflict ->
+            val first = trajectories[conflict.firstConnectionId] ?: return@forEach
+            val second = trajectories[conflict.secondConnectionId] ?: return@forEach
+            conflictZoneCandidates += ConflictZone(
+                conflict.firstConnectionId,
+                conflict.secondConnectionId,
+                distanceAlongPath(first.points, conflict.point),
+                distanceAlongPath(second.points, conflict.point),
+                conflict.point
+            )
+        }
+        val conflictZones = conflictZoneCandidates.distinctBy { zone ->
+            val pair = listOf(zone.firstConnectionId, zone.secondConnectionId).sorted().joinToString("|")
+            "$pair:${(zone.point.xMeters * 4.0).toInt()}:${(zone.point.yMeters * 4.0).toInt()}"
         }
 
         fun timeToCoverDistance(distanceMeters: Double, vehicle: VehicleAgent): Double {
