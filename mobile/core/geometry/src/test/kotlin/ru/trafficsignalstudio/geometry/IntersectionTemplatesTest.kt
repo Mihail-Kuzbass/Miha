@@ -1,6 +1,7 @@
 package ru.trafficsignalstudio.geometry
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.Assert.assertThrows
 
@@ -17,5 +18,24 @@ class IntersectionTemplatesTest {
         assertThrows(IllegalArgumentException::class.java) {
             IntersectionTemplates.fourLeg(lanesPerApproach = 9)
         }
+    }
+
+    @Test
+    fun nonStandardAtGradeTemplatesHaveExpectedApproachCounts() {
+        assertEquals(3, IntersectionTemplates.yJunction().approaches.size)
+        assertEquals(5, IntersectionTemplates.fiveLeg().approaches.size)
+        assertEquals(6, IntersectionTemplates.sixLeg().approaches.size)
+        assertEquals(4, IntersectionTemplates.roundabout().approaches.size)
+    }
+
+    @Test
+    fun interchangeTemplatesContainIndependentRoadSegments() {
+        val diamond = IntersectionTemplates.diamondInterchange()
+        val cloverleaf = IntersectionTemplates.cloverleafInterchange()
+
+        assertEquals(4, diamond.approaches.size)
+        assertTrue(diamond.roadSegments.any { it.elevationLevel > 0 })
+        assertTrue(diamond.roadSegments.any { it.isRamp })
+        assertTrue(cloverleaf.roadSegments.size > diamond.roadSegments.size)
     }
 }
