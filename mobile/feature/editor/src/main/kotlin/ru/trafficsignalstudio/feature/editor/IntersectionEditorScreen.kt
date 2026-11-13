@@ -441,7 +441,8 @@ fun IntersectionEditorScreen(
                         movementConflicts.take(10).forEach { conflict ->
                             val status = when (conflict.signalStatus) {
                                 ConflictSignalStatus.SIMULTANEOUS_GREEN -> "ОДНОВРЕМЕННЫЙ ЗЕЛЁНЫЙ"
-                                ConflictSignalStatus.SEPARATED_BY_PHASE -> "РАЗДЕЛЁН ФАЗАМИ"
+                                ConflictSignalStatus.SEPARATED_BY_PHASE -> "РАЗДЕЛЁН ФАЗАМИ, ЖЁЛТЫЙ + ОБЩИЙ КРАСНЫЙ"
+                                ConflictSignalStatus.PHASES_SEPARATED_NO_CLEARANCE -> "РАЗНЫЕ ФАЗЫ, НЕТ ПОЛНОГО ИНТЕРВАЛА ОЧИСТКИ"
                                 ConflictSignalStatus.UNASSIGNED -> "НЕ НАЗНАЧЕНЫ ФАЗЫ"
                                 ConflictSignalStatus.NO_SIGNAL_PLAN -> "НЕТ ПЛАНА СВЕТОФОРА"
                             }
