@@ -239,24 +239,33 @@ object TrafficSimulationEngine {
             }
             time += step
         }
+        // Include the waiting time accumulated by vehicles that are still queued at the end.
+        states.values.forEach { state ->
+            state.queue.forEach { vehicle ->
+                val waitingSeconds = (demand.durationSeconds - vehicle.arrivalTime).coerceAtLeast(0.0)
+                state.delaySum += waitingSeconds
+                state.delayVehicleHours += waitingSeconds / 3600.0
+                categoryDelay[vehicle.vehicleClass] = (categoryDelay[vehicle.vehicleClass] ?: 0.0) + waitingSeconds
+            }
+        }
         val movementMetrics = states.values.map { state ->
             MovementSimulationMetrics(
                 state.connectionId, state.arrivals, state.departures, state.queue.size, state.maxQueue,
-                if (state.departures == 0) 0.0 else state.delaySum / state.departures,
+                if (state.arrivals == 0) 0.0 else state.delaySum / state.arrivals,
                 state.delayVehicleHours
             )
         }
         val categoryMetrics = (categoryArrivals.keys + categoryDepartures.keys).distinct().map { cls ->
-            val departures = categoryDepartures[cls] ?: 0
-            CategorySimulationMetrics(cls, categoryArrivals[cls] ?: 0, departures,
-                if (departures == 0) 0.0 else (categoryDelay[cls] ?: 0.0) / departures)
+            val arrivals = categoryArrivals[cls] ?: 0
+            CategorySimulationMetrics(cls, arrivals, categoryDepartures[cls] ?: 0,
+                if (arrivals == 0) 0.0 else (categoryDelay[cls] ?: 0.0) / arrivals)
         }
         val allDelay = movementMetrics.sumOf { it.totalDelayVehicleHours }
-        val allDepartedDelaySeconds = movementMetrics.sumOf { it.averageDelaySeconds * it.departures }
+        val allDelaySeconds = movementMetrics.sumOf { it.averageDelaySeconds * it.arrivals }
         return TrafficSimulationResult(
             demand.durationSeconds, timing.cycleLengthSeconds, totalArrivals, totalDepartures,
             states.values.sumOf { it.queue.size }, globalMaxQueue,
-            if (totalDepartures == 0) 0.0 else allDepartedDelaySeconds / totalDepartures,
+            if (totalArrivals == 0) 0.0 else allDelaySeconds / totalArrivals,
             allDelay, movementMetrics, categoryMetrics, snapshots, diagnostics.distinct()
         )
     }
