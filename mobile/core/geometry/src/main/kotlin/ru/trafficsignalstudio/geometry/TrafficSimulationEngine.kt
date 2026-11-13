@@ -136,6 +136,7 @@ data class TrafficSimulationResult(
     val laneStorageUtilizationPercent: Double,
     val maximumLaneStorageUtilizationPercent: Double,
     val crashRiskPercent: Double = 0.0,
+    val geometricConflictCount: Int = 0,
     val crashRiskBand: CrashRiskBand = CrashRiskBand.FOLLOWING_DISTANCE,
     val crashIncidents: List<CrashIncident> = emptyList()
 ) {
@@ -763,6 +764,7 @@ object TrafficSimulationEngine {
             laneStorageUtilizationPercent = (finalLaneQueueLength / demand.approachStorageLengthMeters * 100.0).coerceIn(0.0, 100.0),
             maximumLaneStorageUtilizationPercent = (maximumQueueLengthMeters / demand.approachStorageLengthMeters * 100.0).coerceIn(0.0, 100.0),
             crashRiskPercent = riskAssessment.riskPercent,
+            geometricConflictCount = riskAssessment.geometricConflictCount,
             crashRiskBand = riskAssessment.band,
             crashIncidents = incidents.toList()
         )

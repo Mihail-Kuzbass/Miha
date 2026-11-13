@@ -333,7 +333,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                         ru.trafficsignalstudio.geometry.CrashRiskBand.INTERSECTION_CONFLICT -> "10–40%: риск столкновения 2–3 автомобилей в конфликтной зоне"
                         ru.trafficsignalstudio.geometry.CrashRiskBand.MULTI_VEHICLE -> "40% и выше: риск группового ДТП на перекрёстке"
                     }, style = MaterialTheme.typography.bodySmall)
-                    MetricLine("Геометрических конфликтов", "${simulation.crashIncidents.firstOrNull()?.affectedConnectionIds?.size ?: 0} затронуто движений")
+                    MetricLine("Геометрических конфликтов", "${simulation.geometricConflictCount}")
                     MetricLine("Смоделировано ДТП", "${simulation.crashIncidents.size}")
                     MetricLine("Участников ДТП", "${simulation.crashIncidents.sumOf { it.participants }}")
                     simulation.crashIncidents.forEach { incident ->
