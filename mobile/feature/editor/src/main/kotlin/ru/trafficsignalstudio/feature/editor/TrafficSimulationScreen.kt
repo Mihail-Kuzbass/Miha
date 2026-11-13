@@ -242,6 +242,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     TrafficSimulationCanvas(intersection, simulation.snapshots.getOrNull(selectedSnapshotIndex))
+                    Text("Линейный масштаб: 10 м", style = MaterialTheme.typography.labelSmall)
                     Text("Модельное время: ${simulation.snapshots.getOrNull(selectedSnapshotIndex)?.timeSeconds?.toInt() ?: 0} с")
                     Slider(
                         value = selectedSnapshotIndex.toFloat(),
@@ -411,6 +412,13 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
                 drawLine(Color(0xFF78909C).copy(alpha = 0.45f), map(extension), map(first), strokeWidth = 2.5f)
             }
         }
+        // The ruler uses the same pixels-per-metre factor as road geometry and vehicle bodies.
+        val rulerStart = Offset(14f, size.height - 16f)
+        val rulerEnd = Offset(rulerStart.x + 10f * scale, rulerStart.y)
+        drawLine(Color.White, rulerStart, rulerEnd, strokeWidth = 4f)
+        drawLine(Color(0xFF263238), rulerStart, rulerEnd, strokeWidth = 1.5f)
+        drawLine(Color.White, Offset(rulerStart.x, rulerStart.y - 5f), Offset(rulerStart.x, rulerStart.y + 5f), strokeWidth = 2f)
+        drawLine(Color.White, Offset(rulerEnd.x, rulerEnd.y - 5f), Offset(rulerEnd.x, rulerEnd.y + 5f), strokeWidth = 2f)
         snapshot?.activeVehicles?.forEach { vehicle ->
             val trajectory = trajectoryById[vehicle.connectionId] ?: return@forEach
             val targetPoint = pointAtProgress(trajectory.points, vehicle.progress)
@@ -426,8 +434,9 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
             val center = map(point)
             val color = vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
             val heading = headingAtProgress(trajectory.points, vehicle.progress)
-            val bodyLength = (vehicle.lengthMeters.toFloat() * scale).coerceIn(4f, 80f)
-            val bodyWidth = (vehicle.widthMeters.toFloat() * scale).coerceIn(2.5f, 16f)
+            // Preserve the real model dimensions at the current world-to-screen scale.
+            val bodyLength = vehicle.lengthMeters.toFloat() * scale
+            val bodyWidth = vehicle.widthMeters.toFloat() * scale
             rotate(heading, center) {
                 drawRoundRect(
                     color = color,
