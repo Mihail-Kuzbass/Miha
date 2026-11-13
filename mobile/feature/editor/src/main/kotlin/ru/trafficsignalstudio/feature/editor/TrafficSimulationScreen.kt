@@ -286,7 +286,7 @@ private fun pointAtProgress(points: List<ru.trafficsignalstudio.model.Point2D>, 
     if (distance < 0.0) {
         val first = points[0]; val second = points[1]
         val segment = lengths[0].coerceAtLeast(1e-6)
-        val ratio = distance / segment
+        val ratio = -distance / segment
         return ru.trafficsignalstudio.model.Point2D(
             first.xMeters + (first.xMeters - second.xMeters) * ratio,
             first.yMeters + (first.yMeters - second.yMeters) * ratio
