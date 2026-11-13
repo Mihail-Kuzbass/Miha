@@ -1125,6 +1125,42 @@ object TrafficSimulationEngine {
             laneGroups.values.forEach { group ->
                 val allAgents = group.flatMap { state -> state.vehicles.map { state to it } }
                 val ordered = allAgents.sortedByDescending { it.second.positionMeters }
+
+                // Build nearest-leader relationships in one sweep. The former
+                // implementation filtered the complete lane list for every
+                // vehicle (quadratic work on dense approaches).
+                val leaderByVehicle = mutableMapOf<VehicleAgent, VehicleAgent?>()
+                val approachOrdered = ordered.filter { it.second.positionMeters <= 0.0 }
+                var previousApproachAny: VehicleAgent? = null
+                var previousApproachMoving: VehicleAgent? = null
+                val firstDownstreamByMovement = group.associate { state ->
+                    state.connectionId to state.vehicles
+                        .asSequence()
+                        .filter { it.positionMeters > 0.0 }
+                        .minByOrNull { it.positionMeters }
+                }
+                approachOrdered.forEach { (state, vehicle) ->
+                    val approachLeader = if (vehicle.passingOffsetMeters > 0.5) {
+                        previousApproachMoving ?: previousApproachAny
+                    } else {
+                        previousApproachAny
+                    }
+                    leaderByVehicle[vehicle] = approachLeader
+                        ?: firstDownstreamByMovement[state.connectionId]
+                    previousApproachAny = vehicle
+                    if (vehicle.crashedUntilSeconds?.let { time < it } != true) {
+                        previousApproachMoving = vehicle
+                    }
+                }
+                group.forEach { state ->
+                    val downstream = state.vehicles
+                        .filter { it.positionMeters > 0.0 }
+                        .sortedByDescending { it.positionMeters }
+                    downstream.forEachIndexed { index, vehicle ->
+                        leaderByVehicle[vehicle] = downstream.getOrNull(index - 1)
+                    }
+                }
+
                 for ((state, vehicle) in ordered) {
                     if (vehicle.crashedUntilSeconds?.let { time < it } == true) {
                         vehicle.speedMetersPerSecond = 0.0
@@ -1132,22 +1168,7 @@ object TrafficSimulationEngine {
                     }
                     val model = vehicle.waiting.model
                     val onApproach = vehicle.positionMeters < 0.0
-                    val leaders = if (onApproach) {
-                        ordered.filter { candidate ->
-                            val candidateState = candidate.first
-                            val candidateVehicle = candidate.second
-                            candidateVehicle !== vehicle &&
-                                candidateVehicle.positionMeters > vehicle.positionMeters &&
-                                !(vehicle.passingOffsetMeters > 0.5 && candidateVehicle.crashedUntilSeconds?.let { time < it } == true) &&
-                                (candidateVehicle.positionMeters <= 0.0 ||
-                                    candidateState.connectionId == state.connectionId)
-                        }.map { it.second }
-                    } else {
-                        state.vehicles.filter {
-                            it !== vehicle && it.positionMeters > vehicle.positionMeters
-                        }
-                    }
-                    val leader = leaders.minByOrNull { it.positionMeters - vehicle.positionMeters }
+                    val leader = leaderByVehicle[vehicle]
                     var obstacleGap: Double? = leader?.let {
                         it.positionMeters - it.waiting.model.lengthMeters - vehicle.positionMeters
                     }
