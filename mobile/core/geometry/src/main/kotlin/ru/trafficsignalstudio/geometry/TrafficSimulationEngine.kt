@@ -745,19 +745,21 @@ object TrafficSimulationEngine {
                 val pairZones = conflictZonesByPair[
                     connectionPairKey(state.connectionId, otherState.connectionId)
                 ].orEmpty()
-                val zone = pairZones
-                    .filter { candidate ->
-                        val ownStation = if (candidate.firstConnectionId == state.connectionId)
-                            candidate.firstStationMeters else candidate.secondStationMeters
-                        ownStation + vehicle.waiting.model.lengthMeters >= vehicle.positionMeters
+                var zone: ConflictZone? = null
+                var nearestOwnStation = Double.POSITIVE_INFINITY
+                for (candidate in pairZones) {
+                    val station = if (candidate.firstConnectionId == state.connectionId)
+                        candidate.firstStationMeters else candidate.secondStationMeters
+                    if (station + vehicle.waiting.model.lengthMeters >= vehicle.positionMeters &&
+                        station < nearestOwnStation) {
+                        nearestOwnStation = station
+                        zone = candidate
                     }
-                    .minByOrNull { candidate ->
-                        if (candidate.firstConnectionId == state.connectionId)
-                            candidate.firstStationMeters else candidate.secondStationMeters
-                    } ?: return other.waiting.id < vehicle.waiting.id
-                val ownIsFirst = zone.firstConnectionId == state.connectionId
-                val ownStation = if (ownIsFirst) zone.firstStationMeters else zone.secondStationMeters
-                val otherStation = if (ownIsFirst) zone.secondStationMeters else zone.firstStationMeters
+                }
+                val selectedZone = zone ?: return other.waiting.id < vehicle.waiting.id
+                val ownIsFirst = selectedZone.firstConnectionId == state.connectionId
+                val ownStation = if (ownIsFirst) selectedZone.firstStationMeters else selectedZone.secondStationMeters
+                val otherStation = if (ownIsFirst) selectedZone.secondStationMeters else selectedZone.firstStationMeters
                 val clearance = max(
                     1.0,
                     (vehicle.waiting.model.widthMeters + other.waiting.model.widthMeters) / 2.0 + 0.75
@@ -776,17 +778,25 @@ object TrafficSimulationEngine {
                     (kotlin.math.abs(otherEta - ownEta) <= 0.35 && other.waiting.id < vehicle.waiting.id)
             }
 
-            val possibleConflicts = states.values.asSequence()
-                .filter { it.connectionId in conflictingIds }
-                .flatMap { otherState ->
-                    otherState.vehicles.asSequence()
-                        .filter { other ->
-                            other.crashedUntilSeconds?.let { time < it } != true &&
-                                other.speedMetersPerSecond > 0.25 &&
-                                otherHasPriority(otherState, other)
-                        }
-                        .map { otherState to it }
+            val possibleConflicts = buildList {
+                relevantZones.forEach { indexed ->
+                    val otherState = states[indexed.otherConnectionId] ?: return@forEach
+                    val clearance = max(
+                        1.0,
+                        (vehicle.waiting.model.widthMeters +
+                            VehicleModelCatalog.defaults.maxOfOrNull { it.widthMeters }!!) / 2.0 + 0.75
+                    )
+                    val other = foremostVehicleNotCleared(
+                        indexed.otherConnectionId,
+                        indexed.otherStationMeters + clearance
+                    ) ?: return@forEach
+                    if (other.crashedUntilSeconds?.let { time < it } != true &&
+                        other.speedMetersPerSecond > 0.25 &&
+                        otherHasPriority(otherState, other)) {
+                        add(otherState to other)
+                    }
                 }
+            }.distinctBy { it.second.waiting.id }
             var earliestContact: Double? = null
             for ((otherState, other) in possibleConflicts) {
                 var futureTime = sampleSeconds
