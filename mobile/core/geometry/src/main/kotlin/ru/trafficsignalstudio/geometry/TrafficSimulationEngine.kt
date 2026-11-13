@@ -651,30 +651,64 @@ object TrafficSimulationEngine {
         }
 
         /**
-         * Predicts near-future body-envelope conflicts with vehicles on other
-         * movements. The vehicle with the later simulation ID yields, giving
-         * every conflict a deterministic priority and preventing both drivers
-         * from stopping forever at the same conflict point.
+         * Secondary swept-envelope prediction. It uses the same arrival-time
+         * priority as the reservation controller; vehicle IDs break ties only.
          */
         fun predictiveCollisionBrake(state: MovementState, vehicle: VehicleAgent): Double? {
             if (vehicle.speedMetersPerSecond < 0.5) return null
             val serviceDeceleration = vehicle.waiting.model.serviceDecelerationMetersPerSecondSquared
                 .coerceAtLeast(0.5)
-            // Look far enough ahead for a vehicle travelling at 50 km/h to
-            // brake before reaching the conflict area. Fine sampling avoids
-            // stepping over a short overlap between perpendicular envelopes.
             val sampleSeconds = 0.1
             val horizonSeconds = 8.0
             val conflictingIds = conflictingConnectionsById[state.connectionId].orEmpty()
             if (conflictingIds.isEmpty()) return null
+
+            fun otherHasPriority(otherState: MovementState, other: VehicleAgent): Boolean {
+                val pairZones = conflictZones.filter { zone ->
+                    (zone.firstConnectionId == state.connectionId &&
+                        zone.secondConnectionId == otherState.connectionId) ||
+                        (zone.secondConnectionId == state.connectionId &&
+                            zone.firstConnectionId == otherState.connectionId)
+                }
+                val zone = pairZones
+                    .filter { candidate ->
+                        val ownStation = if (candidate.firstConnectionId == state.connectionId)
+                            candidate.firstStationMeters else candidate.secondStationMeters
+                        ownStation + vehicle.waiting.model.lengthMeters >= vehicle.positionMeters
+                    }
+                    .minByOrNull { candidate ->
+                        if (candidate.firstConnectionId == state.connectionId)
+                            candidate.firstStationMeters else candidate.secondStationMeters
+                    } ?: return other.waiting.id < vehicle.waiting.id
+                val ownIsFirst = zone.firstConnectionId == state.connectionId
+                val ownStation = if (ownIsFirst) zone.firstStationMeters else zone.secondStationMeters
+                val otherStation = if (ownIsFirst) zone.secondStationMeters else zone.firstStationMeters
+                val clearance = max(
+                    1.0,
+                    (vehicle.waiting.model.widthMeters + other.waiting.model.widthMeters) / 2.0 + 0.75
+                )
+                val ownEntryFront = ownStation - clearance
+                val otherEntryFront = otherStation - clearance
+                val ownInside = vehicle.positionMeters >= ownEntryFront &&
+                    vehicle.positionMeters - vehicle.waiting.model.lengthMeters <= ownStation + clearance
+                val otherInside = other.positionMeters >= otherEntryFront &&
+                    other.positionMeters - other.waiting.model.lengthMeters <= otherStation + clearance
+                if (ownInside) return false
+                if (otherInside) return true
+                val ownEta = timeToCoverDistance(ownEntryFront - vehicle.positionMeters, vehicle)
+                val otherEta = timeToCoverDistance(otherEntryFront - other.positionMeters, other)
+                return otherEta < ownEta - 0.35 ||
+                    (kotlin.math.abs(otherEta - ownEta) <= 0.35 && other.waiting.id < vehicle.waiting.id)
+            }
+
             val possibleConflicts = states.values.asSequence()
                 .filter { it.connectionId in conflictingIds }
                 .flatMap { otherState ->
                     otherState.vehicles.asSequence()
                         .filter { other ->
-                            other.waiting.id < vehicle.waiting.id &&
-                                other.crashedUntilSeconds?.let { time < it } != true &&
-                                other.speedMetersPerSecond > 0.25
+                            other.crashedUntilSeconds?.let { time < it } != true &&
+                                other.speedMetersPerSecond > 0.25 &&
+                                otherHasPriority(otherState, other)
                         }
                         .map { otherState to it }
                 }
@@ -707,9 +741,6 @@ object TrafficSimulationEngine {
                 }
             }
             val timeToContact = earliestContact ?: return null
-            // The previous half-rate estimate allowed the vehicle to cover
-            // almost the entire predicted gap before stopping. Use the full
-            // time-to-contact requirement and reserve a reaction/safety margin.
             val usableTime = (timeToContact - 0.4).coerceAtLeast(0.2)
             val requiredDeceleration = (vehicle.speedMetersPerSecond / usableTime)
                 .coerceIn(0.8, serviceDeceleration)
