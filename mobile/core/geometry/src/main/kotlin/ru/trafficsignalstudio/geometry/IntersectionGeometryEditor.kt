@@ -81,7 +81,8 @@ object IntersectionGeometryEditor {
                 add("Некорректная ширина сегмента «${segment.name}»")
             }
             if (segment.laneCount !in 1..16) add("Некорректное количество полос сегмента «${segment.name}»")
-            if (segment.arcRadiusMeters != null && (!segment.arcRadiusMeters.isFinite() || segment.arcRadiusMeters <= 0.0)) {
+            val arcRadiusMeters = segment.arcRadiusMeters
+            if (arcRadiusMeters != null && (!arcRadiusMeters.isFinite() || arcRadiusMeters <= 0.0)) {
                 add("Некорректный радиус дуги сегмента «${segment.name}»")
             }
             if (segment.centerline.any { !it.xMeters.isFinite() || !it.yMeters.isFinite() }) {
