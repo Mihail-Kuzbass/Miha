@@ -479,6 +479,10 @@ object TrafficSimulationEngine {
          * arrivals. A vehicle already occupying the zone always retains it.
          */
         fun conflictZoneControl(state: MovementState, vehicle: VehicleAgent): ConflictControl? {
+            // A red-signal queue must not reserve a crossing against a green stream.
+            // Vehicles already inside the conflict envelope retain occupancy priority.
+            if (vehicle.positionMeters < 0.0 &&
+                (!greenFor(state.connectionId, time) || isBlocked(state.connectionId, time))) return null
             var selected: ConflictControl? = null
             for (zone in conflictZones) {
                 val ownIsFirst = zone.firstConnectionId == state.connectionId
@@ -505,6 +509,9 @@ object TrafficSimulationEngine {
                         vehicle.positionMeters - vehicle.waiting.model.lengthMeters <= ownStation + clearance
                     val otherInside = other.positionMeters >= otherEntryFront &&
                         other.positionMeters - other.waiting.model.lengthMeters <= otherStation + clearance
+                    val otherCanClaimZone = otherInside || other.positionMeters >= 0.0 ||
+                        (greenFor(otherConnectionId, time) && !isBlocked(otherConnectionId, time))
+                    if (!otherCanClaimZone) continue
                     val intervalsOverlap = ownEntryTime <= otherExitTime + 0.35 &&
                         otherEntryTime <= ownExitTime + 0.35
                     if (!intervalsOverlap || ownInside) continue
@@ -524,8 +531,8 @@ object TrafficSimulationEngine {
                     else (vehicle.speedMetersPerSecond * vehicle.speedMetersPerSecond /
                         (2.0 * reactionAdjustedDistance)).coerceIn(0.8, serviceDeceleration)
                     val candidate = ConflictControl(-requiredDeceleration, stopPosition)
-                    if (selected == null ||
-                        candidate.stopAtFrontPositionMeters < selected!!.stopAtFrontPositionMeters) {
+                    if (candidate.stopAtFrontPositionMeters <
+                        (selected?.stopAtFrontPositionMeters ?: Double.POSITIVE_INFINITY)) {
                         selected = candidate
                     }
                 }
