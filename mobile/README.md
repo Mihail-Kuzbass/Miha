@@ -12,18 +12,20 @@
 
 ## Сборка
 
-Требуются Android Studio с JDK 17 или новее и Android SDK Platform 37.
+Требуются Android Studio с JDK 17 и Android SDK Platform 37.
 
 После открытия каталога `mobile/` в Android Studio выполните:
 
 ```bash
+gradle :core:model:test
+gradle :core:geometry:test
 gradle :app:assembleDebug
 gradle :app:testDebugUnitTest
 ```
 
 APK ожидается по пути `app/build/outputs/apk/debug/app-debug.apk`.
 
-На данном этапе Gradle Wrapper JAR и скрипты не включены. Для локальной сборки можно открыть проект в Android Studio либо сгенерировать wrapper командой `gradle wrapper --gradle-version 9.9.1`.
+Gradle Wrapper JAR и скрипты пока не включены. Для локальной сборки можно открыть проект в Android Studio либо сгенерировать wrapper командой `gradle wrapper --gradle-version 9.7.0`.
 
 ## Модули
 
