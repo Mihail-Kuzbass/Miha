@@ -467,10 +467,19 @@ object TrafficSimulationEngine {
         fun timeToCoverDistance(distanceMeters: Double, vehicle: VehicleAgent): Double {
             if (distanceMeters <= 0.0) return 0.0
             val speed = vehicle.speedMetersPerSecond
-            val acceleration = vehicle.waiting.model.accelerationMetersPerSecondSquared.coerceAtLeast(0.1)
-            if (speed < 0.1) return sqrt(2.0 * distanceMeters / acceleration)
+            if (speed < 0.1) {
+                val launchAcceleration = vehicle.waiting.model.accelerationMetersPerSecondSquared
+                    .coerceAtLeast(0.1)
+                return sqrt(2.0 * distanceMeters / launchAcceleration)
+            }
+            // Use the vehicle's current longitudinal acceleration, not its
+            // maximum engine acceleration. A vehicle already at free-flow speed
+            // must not be predicted to accelerate while reserving a zone.
+            val acceleration = vehicle.accelerationMetersPerSecondSquared
+            if (kotlin.math.abs(acceleration) < 0.05) return distanceMeters / speed
             val discriminant = speed * speed + 2.0 * acceleration * distanceMeters
-            return (sqrt(discriminant) - speed) / acceleration
+            if (discriminant <= 0.0) return Double.POSITIVE_INFINITY
+            return (-speed + sqrt(discriminant)) / acceleration
         }
 
         /**
