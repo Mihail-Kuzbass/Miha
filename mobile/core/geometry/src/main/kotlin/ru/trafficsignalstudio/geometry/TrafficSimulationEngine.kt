@@ -517,6 +517,35 @@ object TrafficSimulationEngine {
             } += zone
         }
 
+        // Refreshed once per simulation tick. Each movement list is sorted
+        // front-to-back, allowing conflict checks to inspect only the foremost
+        // vehicle that has not physically cleared a zone.
+        var orderedVehiclesByMovement: Map<String, List<VehicleAgent>> = emptyMap()
+        fun foremostVehicleNotCleared(
+            connectionId: String,
+            zoneExitFrontMeters: Double
+        ): VehicleAgent? {
+            val vehicles = orderedVehiclesByMovement[connectionId].orEmpty()
+            if (vehicles.isEmpty()) return null
+            // The catalog's longest road vehicle is shorter than this conservative
+            // search window; the rear-bumper test below remains exact per vehicle.
+            var low = 0
+            var high = vehicles.size
+            val searchLimit = zoneExitFrontMeters + 25.0
+            while (low < high) {
+                val middle = (low + high) ushr 1
+                if (vehicles[middle].positionMeters > searchLimit) low = middle + 1
+                else high = middle
+            }
+            for (index in low until vehicles.size) {
+                val candidate = vehicles[index]
+                if (candidate.positionMeters - candidate.waiting.model.lengthMeters <= zoneExitFrontMeters) {
+                    return candidate
+                }
+            }
+            return null
+        }
+
         fun timeToCoverDistance(distanceMeters: Double, vehicle: VehicleAgent): Double {
             if (distanceMeters <= 0.0) return 0.0
             val speed = vehicle.speedMetersPerSecond
@@ -551,16 +580,20 @@ object TrafficSimulationEngine {
                 val ownStation = indexedZone.ownStationMeters
                 val otherStation = indexedZone.otherStationMeters
                 val otherState = states[otherConnectionId] ?: continue
-                for (other in otherState.vehicles) {
-                    if (other === vehicle || other.crashedUntilSeconds?.let { time >= it } == true) continue
-                    val clearance = max(
-                        1.0,
-                        (vehicle.waiting.model.widthMeters + other.waiting.model.widthMeters) / 2.0 + 0.75
-                    )
-                    val ownEntryFront = ownStation - clearance
-                    val ownExitFront = ownStation + clearance + vehicle.waiting.model.lengthMeters
-                    val otherEntryFront = otherStation - clearance
-                    val otherExitFront = otherStation + clearance + other.waiting.model.lengthMeters
+                val minimumClearance = max(1.0, vehicle.waiting.model.widthMeters / 2.0 + 0.75)
+                val other = foremostVehicleNotCleared(
+                    otherConnectionId,
+                    otherStation + minimumClearance + 25.0
+                ) ?: continue
+                if (other === vehicle || other.crashedUntilSeconds?.let { time >= it } == true) continue
+                val clearance = max(
+                    1.0,
+                    (vehicle.waiting.model.widthMeters + other.waiting.model.widthMeters) / 2.0 + 0.75
+                )
+                val ownEntryFront = ownStation - clearance
+                val ownExitFront = ownStation + clearance + vehicle.waiting.model.lengthMeters
+                val otherEntryFront = otherStation - clearance
+                val otherExitFront = otherStation + clearance + other.waiting.model.lengthMeters
                     val ownEntryTime = timeToCoverDistance(ownEntryFront - vehicle.positionMeters, vehicle)
                     val ownExitTime = timeToCoverDistance(ownExitFront - vehicle.positionMeters, vehicle)
                     val otherEntryTime = timeToCoverDistance(otherEntryFront - other.positionMeters, other)
@@ -594,10 +627,9 @@ object TrafficSimulationEngine {
                     else (vehicle.speedMetersPerSecond * vehicle.speedMetersPerSecond /
                         (2.0 * reactionAdjustedDistance)).coerceIn(0.8, serviceDeceleration)
                     val candidate = ConflictControl(-requiredDeceleration, stopPosition)
-                    if (candidate.stopAtFrontPositionMeters <
-                        (selected?.stopAtFrontPositionMeters ?: Double.POSITIVE_INFINITY)) {
-                        selected = candidate
-                    }
+                if (candidate.stopAtFrontPositionMeters <
+                    (selected?.stopAtFrontPositionMeters ?: Double.POSITIVE_INFINITY)) {
+                    selected = candidate
                 }
             }
             return selected
@@ -1066,6 +1098,13 @@ object TrafficSimulationEngine {
                             .coerceIn(-maxLateralStep, maxLateralStep)
                     }
                 }
+            }
+
+            // Build movement-local front-to-back indexes once per tick.
+            // Reservation checks then inspect only the foremost vehicle that
+            // has not cleared each conflict zone, rather than every queued car.
+            orderedVehiclesByMovement = states.mapValues { (_, state) ->
+                state.vehicles.sortedByDescending { it.positionMeters }
             }
 
             // Update vehicles front-to-back on each physical approach lane. On
