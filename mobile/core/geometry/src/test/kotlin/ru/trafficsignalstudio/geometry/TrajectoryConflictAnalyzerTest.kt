@@ -72,6 +72,17 @@ class TrajectoryConflictAnalyzerTest {
     }
 
     @Test
+    fun differentPhasesWithoutYellowAndAllRedAreNotDeclaredFullySeparated() {
+        val plan = SignalPlan(phases = listOf(
+            SignalPhase(id = "phase-1", name = "Север-юг", greenConnectionIds = setOf("north-through"),
+                yellowSeconds = 0, allRedSeconds = 0),
+            SignalPhase(id = "phase-2", name = "Запад-восток", greenConnectionIds = setOf("west-through"))
+        ))
+        val conflicts = TrajectoryConflictAnalyzer.analyzeMovementConflicts(crossingMovementIntersection(plan))
+        assertEquals(ConflictSignalStatus.PHASES_SEPARATED_NO_CLEARANCE, conflicts.single().signalStatus)
+    }
+
+    @Test
     fun unassignedMovementIsNotAssumedToBeSafelySeparated() {
         val plan = SignalPlan(phases = listOf(
             SignalPhase(id = "phase-1", name = "Север-юг", greenConnectionIds = setOf("north-through"))
