@@ -232,8 +232,12 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     MetricLine("Поступило", "${simulation.totalArrivals} авт.")
                     MetricLine("Проехало стоп-линию", "${simulation.totalDepartures} авт.")
-                    MetricLine("Осталось в очередях", "${simulation.totalQueueAtEnd} авт.")
+                    MetricLine("Осталось в очередях и на подходах", "${simulation.totalQueueAtEnd} авт.")
                     MetricLine("Максимальная очередь", "${simulation.maximumQueueVehicles} авт.")
+                    MetricLine("Занято в пределах полос", "${simulation.physicalLaneVehiclesAtEnd} авт.")
+                    MetricLine("Ожидают за границей участка", "${simulation.upstreamQueueAtEnd} авт.")
+                    MetricLine("Заполнение полос к концу", "${"%.1f".format(simulation.laneStorageUtilizationPercent)} %")
+                    MetricLine("Максимальное заполнение полос", "${"%.1f".format(simulation.maximumLaneStorageUtilizationPercent)} %")
                     MetricLine("Средняя задержка", "${"%.1f".format(simulation.averageDelaySeconds)} с/авт.")
                     MetricLine("Пропуск за час (по факту)", "${"%.0f".format(simulation.throughputVehiclesPerHour)} авт./ч")
                     MetricLine("Суммарная задержка", "${"%.2f".format(simulation.totalDelayVehicleHours)} авт.-ч")
@@ -353,9 +357,6 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
             val trajectory = trajectoryById[vehicle.connectionId] ?: return@forEach
             val point = pointAtProgress(trajectory.points, vehicle.progress)
             val center = map(point)
-            val model = vehicle.vehicleClass?.let { cls ->
-                VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls }
-            } ?: VehicleModelCatalog.defaultPassengerCar
             val color = vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
             val heading = headingAtProgress(trajectory.points, vehicle.progress)
             val bodyLength = (vehicle.lengthMeters.toFloat() * scale).coerceIn(4f, 80f)
