@@ -84,6 +84,37 @@ class TrafficSimulationEngineTest {
         }
     }
 
+    @Test fun congestedLaneAutomaticallyMovesVehiclesToCompatibleAdjacentLane() {
+        val incomingA = Lane(id = "in-a", index = 0, allowedMovements = setOf(MovementKind.THROUGH))
+        val incomingB = Lane(id = "in-b", index = 1, allowedMovements = setOf(MovementKind.THROUGH))
+        val outgoing = Lane(id = "out", index = 0, flowDirection = LaneFlowDirection.OUT_OF_INTERSECTION)
+        val intersection = Intersection(
+            name = "Две полосы", type = IntersectionType.CUSTOM,
+            approaches = listOf(
+                Approach(id = "a", name = "A", headingDegrees = 0.0, lanes = listOf(incomingA, incomingB)),
+                Approach(id = "b", name = "B", headingDegrees = 180.0, lanes = listOf(outgoing))
+            ),
+            laneConnections = listOf(
+                LaneConnection(id = "through-a", fromApproachId = "a", fromLaneId = "in-a", toApproachId = "b", toLaneId = "out"),
+                LaneConnection(id = "through-b", fromApproachId = "a", fromLaneId = "in-b", toApproachId = "b", toLaneId = "out")
+            ),
+            signalPlan = SignalPlan(phases = listOf(
+                SignalPhase(id = "p", name = "Основная", greenConnectionIds = setOf("through-a", "through-b"),
+                    greenSeconds = 25, yellowSeconds = 3, allRedSeconds = 2)
+            ))
+        )
+        val result = TrafficSimulationEngine.run(intersection, TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("through-a", 3600.0)),
+            durationSeconds = 180,
+            approachStorageLengthMeters = 120.0
+        ))
+        assertTrue("No vehicle was assigned to the less-loaded compatible lane",
+            result.snapshots.flatMap { it.activeVehicles }.any { it.connectionId == "through-b" })
+        assertTrue("Lane changes should be represented during the lateral transition",
+            result.snapshots.flatMap { it.activeVehicles }.any { it.laneChangeFromConnectionId == "through-a" && it.laneChangeProgress < 1.0 })
+        assertEquals(result.totalArrivals, result.categoryMetrics.sumOf { it.arrivals })
+    }
+
     @Test fun vehicleCategoryUsesItsPhysicalVehicleLengthInSnapshots() {
         val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
             movements = listOf(MovementTrafficDemand("m1", 3600.0,

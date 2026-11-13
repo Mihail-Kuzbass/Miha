@@ -65,7 +65,10 @@ data class SimulatedVehicle(
     val positionMeters: Double = 0.0,
     val speedMetersPerSecond: Double = 0.0,
     val lengthMeters: Double = 4.6,
-    val widthMeters: Double = 1.8
+    val widthMeters: Double = 1.8,
+    /** Previous lane's movement path while the lateral manoeuvre is in progress. */
+    val laneChangeFromConnectionId: String? = null,
+    val laneChangeProgress: Double = 1.0
 )
 
 data class MovementSimulationMetrics(
@@ -140,7 +143,8 @@ object TrafficSimulationEngine {
         val id: Long,
         val vehicleClass: VehicleClass?,
         val model: VehicleModel,
-        val arrivalTime: Double
+        val arrivalTime: Double,
+        val demandConnectionId: String
     )
 
     private data class VehicleAgent(
@@ -148,12 +152,16 @@ object TrafficSimulationEngine {
         var positionMeters: Double,
         var speedMetersPerSecond: Double,
         var accelerationMetersPerSecondSquared: Double = 0.0,
-        var crossingTimeSeconds: Double? = null
+        var crossingTimeSeconds: Double? = null,
+        var laneChangeFromConnectionId: String? = null,
+        var laneChangeProgress: Double = 1.0
     )
 
     private class MovementState(
         val connectionId: String,
+        val fromApproachId: String,
         val fromLaneId: String,
+        val movementKind: ru.trafficsignalstudio.model.MovementKind,
         val pathLengthMeters: Double
     ) {
         val pending = ArrayDeque<WaitingVehicle>()
@@ -194,11 +202,20 @@ object TrafficSimulationEngine {
         val states = configured.associate { item ->
             val connection = connections.getValue(item.connectionId)
             val length = trajectories[item.connectionId]?.points?.let(::polylineLength)?.coerceAtLeast(8.0) ?: 20.0
+            val trajectory = trajectories[item.connectionId]
             item.connectionId to MovementState(
-                item.connectionId, "${connection.fromApproachId}|${connection.fromLaneId}", length
+                item.connectionId,
+                connection.fromApproachId,
+                connection.fromLaneId,
+                trajectory?.movementKind ?: ru.trafficsignalstudio.model.MovementKind.THROUGH,
+                length
             )
         }
         val laneGroups = states.values.groupBy { it.fromLaneId }
+        val approachGroups = states.values.groupBy { it.fromApproachId }
+        val approachLanes = intersection.approaches.associate { approach ->
+            approach.id to approach.lanes.associateBy { it.id }
+        }
         if (laneGroups.values.any { group -> group.size > 1 }) {
             diagnostics += "Несколько движений с одной въездной полосы используют общую физическую очередь и общую дистанцию между автомобилями."
         }
@@ -287,7 +304,7 @@ object TrafficSimulationEngine {
                     val interval = 3600.0 / rate
                     var arrival = nextArrival[key] ?: interval
                     while (arrival <= time + 1e-9) {
-                        state.pending.addLast(WaitingVehicle(nextId++, vehicleClass, createModel(vehicleClass), arrival))
+                        state.pending.addLast(WaitingVehicle(nextId++, vehicleClass, createModel(vehicleClass), arrival, state.connectionId))
                         state.arrivals++
                         totalArrivals++
                         categoryArrivals[vehicleClass] = (categoryArrivals[vehicleClass] ?: 0) + 1
@@ -327,8 +344,67 @@ object TrafficSimulationEngine {
                 }
             }
 
+            // Lane choice is route-based: a vehicle may move only to another
+            // source lane on the same approach that permits the same manoeuvre.
+            // Both the target front and rear gaps are checked before transfer.
+            val laneChanges = mutableListOf<Triple<MovementState, MovementState, VehicleAgent>>()
+            approachGroups.values.forEach { approachStates ->
+                val statesByLane = approachStates.groupBy { it.fromLaneId }
+                approachStates.forEach { sourceState ->
+                    val sourceVehicles = sourceState.vehicles.toList()
+                    sourceVehicles.forEach vehicleLoop@{ vehicle ->
+                        if (vehicle.positionMeters !in -55.0..-5.0 ||
+                            vehicle.speedMetersPerSecond < 2.0 || vehicle.laneChangeProgress < 1.0) return@vehicleLoop
+                        val sourceLane = approachLanes[sourceState.fromApproachId]?.get(sourceState.fromLaneId)
+                            ?: return@vehicleLoop
+                        val sourceLaneAgents = statesByLane[sourceState.fromLaneId].orEmpty().flatMap { it.vehicles }
+                        val sourceLeader = sourceLaneAgents.filter { it !== vehicle && it.positionMeters > vehicle.positionMeters }
+                            .minByOrNull { it.positionMeters - vehicle.positionMeters }
+                        val sourceGap = sourceLeader?.let {
+                            it.positionMeters - it.waiting.model.lengthMeters - vehicle.positionMeters
+                        } ?: Double.POSITIVE_INFINITY
+                        val sourceLoad = sourceLaneAgents.count { it.positionMeters <= 0.0 }
+                        val candidates = approachStates.filter { target ->
+                            if (target.fromLaneId == sourceState.fromLaneId || target.movementKind != sourceState.movementKind) return@filter false
+                            val targetLane = approachLanes[target.fromApproachId]?.get(target.fromLaneId) ?: return@filter false
+                            targetLane.allowedMovements.contains(target.movementKind) &&
+                                targetLane.widthMeters >= vehicle.waiting.model.widthMeters + 0.2
+                        }.mapNotNull { target ->
+                            val targetAgents = statesByLane[target.fromLaneId].orEmpty().flatMap { it.vehicles }
+                                .filter { it.positionMeters <= 0.0 && it !== vehicle }
+                            val leader = targetAgents.filter { it.positionMeters > vehicle.positionMeters }
+                                .minByOrNull { it.positionMeters - vehicle.positionMeters }
+                            val follower = targetAgents.filter { it.positionMeters < vehicle.positionMeters }
+                                .maxByOrNull { it.positionMeters }
+                            val frontGap = leader?.let {
+                                it.positionMeters - it.waiting.model.lengthMeters - vehicle.positionMeters
+                            } ?: Double.POSITIVE_INFINITY
+                            val rearGap = follower?.let {
+                                vehicle.positionMeters - vehicle.waiting.model.lengthMeters - it.positionMeters
+                            } ?: Double.POSITIVE_INFINITY
+                            val requiredFront = vehicle.waiting.model.minimumGapMeters + vehicle.speedMetersPerSecond * 0.45
+                            val requiredRear = (follower?.waiting?.model?.minimumGapMeters ?: 0.0) +
+                                (follower?.speedMetersPerSecond ?: 0.0) * 0.45
+                            if (frontGap + 1e-6 < requiredFront || rearGap + 1e-6 < requiredRear) null
+                            else Triple(target, targetAgents.count { it.positionMeters <= 0.0 }, frontGap)
+                        }
+                        val best = candidates.minWithOrNull(compareBy<Triple<MovementState, Int, Double>>({ it.second }, { -it.third }))
+                        if (best != null && (sourceGap < 24.0 || sourceLoad > best.second + 1)) {
+                            laneChanges += Triple(sourceState, best.first, vehicle)
+                        }
+                    }
+                }
+            }
+            laneChanges.distinctBy { it.third.waiting.id }.forEach { (source, target, vehicle) ->
+                if (source.vehicles.remove(vehicle)) {
+                    vehicle.laneChangeFromConnectionId = source.connectionId
+                    vehicle.laneChangeProgress = 0.0
+                    target.vehicles += vehicle
+                }
+            }
+
             // Update vehicles front-to-back on each physical approach lane. On
-            // the approach, a vehicle follows any leader sharing its source lane;
+            // the approach, a vehicle follows any leader sharing its current lane;
             // after crossing, it follows only vehicles on its own movement path.
             laneGroups.values.forEach { group ->
                 val allAgents = group.flatMap { state -> state.vehicles.map { state to it } }
@@ -389,20 +465,25 @@ object TrafficSimulationEngine {
                     }
                     vehicle.positionMeters = nextPosition
                     vehicle.accelerationMetersPerSecondSquared = acceleration
+                    if (vehicle.laneChangeFromConnectionId != null) {
+                        vehicle.laneChangeProgress = (vehicle.laneChangeProgress + step / 3.0).coerceAtMost(1.0)
+                        if (vehicle.laneChangeProgress >= 1.0) vehicle.laneChangeFromConnectionId = null
+                    }
 
                     if (vehicle.crossingTimeSeconds == null && oldPosition < 0.0 && nextPosition >= 0.0) {
                         val fraction = (0.0 - oldPosition) / (nextPosition - oldPosition).coerceAtLeast(1e-9)
                         val crossingTime = time + fraction.coerceIn(0.0, 1.0) * step
                         vehicle.crossingTimeSeconds = crossingTime
-                        state.departures++
+                        (states[vehicle.waiting.demandConnectionId] ?: state).departures++
                         totalDepartures++
                         categoryDepartures[vehicle.waiting.vehicleClass] =
                             (categoryDepartures[vehicle.waiting.vehicleClass] ?: 0) + 1
                         val freeFlowSpeed = min(demand.approachSpeedKmh, model.maximumSpeedKmh) / 3.6
                         val freeFlowSeconds = demand.approachStorageLengthMeters / freeFlowSpeed.coerceAtLeast(0.1)
                         val delay = (crossingTime - vehicle.waiting.arrivalTime - freeFlowSeconds).coerceAtLeast(0.0)
-                        state.delaySum += delay
-                        state.delayVehicleHours += delay / 3600.0
+                        val demandState = states[vehicle.waiting.demandConnectionId] ?: state
+                        demandState.delaySum += delay
+                        demandState.delayVehicleHours += delay / 3600.0
                         categoryDelay[vehicle.waiting.vehicleClass] =
                             (categoryDelay[vehicle.waiting.vehicleClass] ?: 0.0) + delay
                     }
@@ -452,7 +533,9 @@ object TrafficSimulationEngine {
                             positionMeters = vehicle.positionMeters,
                             speedMetersPerSecond = vehicle.speedMetersPerSecond,
                             lengthMeters = vehicle.waiting.model.lengthMeters,
-                            widthMeters = vehicle.waiting.model.widthMeters
+                            widthMeters = vehicle.waiting.model.widthMeters,
+                            laneChangeFromConnectionId = vehicle.laneChangeFromConnectionId,
+                            laneChangeProgress = vehicle.laneChangeProgress
                         )
                     }
                 }.toMutableList()

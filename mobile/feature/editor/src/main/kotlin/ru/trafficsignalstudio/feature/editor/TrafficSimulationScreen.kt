@@ -289,7 +289,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 }
             }
             simulation.diagnostics.forEach { Text("Предупреждение: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Text("Движение рассчитывается по IDM: длина кузова, безопасный зазор, временной интервал, ускорение и замедление каждого класса ТС. Подход имеет конечную вместимость; неразместившийся поток учитывается отдельно. Модель пока не включает перестроения, пешеходов, блокирование выходных полос и калибровку по натурным наблюдениям.",
+            Text("Движение рассчитывается по IDM с учётом длины кузова, безопасного зазора, временного интервала, ускорения и замедления. Автомобили автоматически выбирают менее загруженную полосу только при совпадении разрешённого манёвра и наличии безопасных интервалов спереди и сзади; перестроение длится 3 секунды и отображается на траектории. Подход имеет конечную вместимость; неразместившийся поток учитывается отдельно. Пока не моделируются перестроения между разными манёврами, пешеходы, блокирование выходных полос и калибровка по натурным наблюдениям.",
                 style = MaterialTheme.typography.labelSmall)
         }
     }
@@ -369,7 +369,18 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
             )
         }
         val vehiclePoints = snapshot?.activeVehicles.orEmpty().mapNotNull { vehicle ->
-            trajectoryById[vehicle.connectionId]?.let { pointAtProgress(it.points, vehicle.progress) }
+            trajectoryById[vehicle.connectionId]?.let { target ->
+                val targetPoint = pointAtProgress(target.points, vehicle.progress)
+                val source = vehicle.laneChangeFromConnectionId?.let(trajectoryById::get)
+                if (source == null) targetPoint else {
+                    val sourcePoint = pointAtProgress(source.points, vehicle.progress)
+                    val blend = vehicle.laneChangeProgress.coerceIn(0.0, 1.0)
+                    ru.trafficsignalstudio.model.Point2D(
+                        sourcePoint.xMeters + (targetPoint.xMeters - sourcePoint.xMeters) * blend,
+                        sourcePoint.yMeters + (targetPoint.yMeters - sourcePoint.yMeters) * blend
+                    )
+                }
+            }
         }
         val allPoints = trajectories.flatMap { it.points } + approachExtensions + vehiclePoints
         if (allPoints.isEmpty()) return@Canvas
@@ -402,7 +413,16 @@ private fun TrafficSimulationCanvas(intersection: Intersection, snapshot: Traffi
         }
         snapshot?.activeVehicles?.forEach { vehicle ->
             val trajectory = trajectoryById[vehicle.connectionId] ?: return@forEach
-            val point = pointAtProgress(trajectory.points, vehicle.progress)
+            val targetPoint = pointAtProgress(trajectory.points, vehicle.progress)
+            val sourceTrajectory = vehicle.laneChangeFromConnectionId?.let(trajectoryById::get)
+            val point = if (sourceTrajectory == null) targetPoint else {
+                val sourcePoint = pointAtProgress(sourceTrajectory.points, vehicle.progress)
+                val blend = vehicle.laneChangeProgress.coerceIn(0.0, 1.0)
+                ru.trafficsignalstudio.model.Point2D(
+                    sourcePoint.xMeters + (targetPoint.xMeters - sourcePoint.xMeters) * blend,
+                    sourcePoint.yMeters + (targetPoint.yMeters - sourcePoint.yMeters) * blend
+                )
+            }
             val center = map(point)
             val color = vehicle.vehicleClass?.displayColor() ?: Color(0xFF90A4AE)
             val heading = headingAtProgress(trajectory.points, vehicle.progress)
