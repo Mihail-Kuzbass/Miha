@@ -133,6 +133,7 @@ class ProjectJsonStore(context: Context) {
                     val movements = (0 until movementsJson.length())
                         .mapNotNull { runCatching { MovementKind.valueOf(movementsJson.getString(it)) }.getOrNull() }
                         .toSet()
+                        .ifEmpty { setOf(MovementKind.THROUGH) }
                     Lane(
                         id = laneJson.optString("id"),
                         index = laneJson.optInt("index"),
