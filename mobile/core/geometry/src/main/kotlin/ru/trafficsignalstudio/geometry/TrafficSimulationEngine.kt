@@ -84,7 +84,9 @@ data class TrafficSimulationSnapshot(
     val timeSeconds: Double,
     val activeVehicles: List<SimulatedVehicle>,
     val totalQueueVehicles: Int,
-    val departedVehicles: Int
+    val departedVehicles: Int,
+    val physicalLaneVehicles: Int = 0,
+    val upstreamWaitingVehicles: Int = 0
 )
 
 data class TrafficSimulationResult(
@@ -99,7 +101,11 @@ data class TrafficSimulationResult(
     val movementMetrics: List<MovementSimulationMetrics>,
     val categoryMetrics: List<CategorySimulationMetrics>,
     val snapshots: List<TrafficSimulationSnapshot>,
-    val diagnostics: List<String>
+    val diagnostics: List<String>,
+    val physicalLaneVehiclesAtEnd: Int = 0,
+    val upstreamQueueAtEnd: Int = 0,
+    val laneStorageUtilizationPercent: Double = 0.0,
+    val maximumLaneStorageUtilizationPercent: Double = 0.0
 ) {
     val throughputVehiclesPerHour: Double
         get() = totalDepartures * 3600.0 / durationSeconds.coerceAtLeast(1)
@@ -212,6 +218,7 @@ object TrafficSimulationEngine {
         var totalArrivals = 0
         var totalDepartures = 0
         var globalMaxQueue = 0
+        var maximumLaneStorageUtilizationPercent = 0.0
         var snapshotAt = 0.0
 
         fun greenFor(connectionId: String, atSeconds: Double): Boolean {
@@ -367,6 +374,15 @@ object TrafficSimulationEngine {
             }
 
             val queueTotal = physicalLanes.sumOf { it.vehicles.size + it.upstreamQueue.size }
+            val laneVehicleTotal = physicalLanes.sumOf { it.vehicles.size }
+            val occupiedStorageMeters = physicalLanes.sumOf { lane ->
+                lane.vehicles.sumOf { it.model.lengthMeters } +
+                    (lane.vehicles.size - 1).coerceAtLeast(0) * demand.minimumGapMeters
+            }
+            val storageCapacityMeters = physicalLanes.size * demand.approachStorageLengthMeters
+            val storageUtilization = if (storageCapacityMeters <= 0.0) 0.0
+                else (occupiedStorageMeters / storageCapacityMeters * 100.0).coerceIn(0.0, 100.0)
+            maximumLaneStorageUtilizationPercent = maxOf(maximumLaneStorageUtilizationPercent, storageUtilization)
             globalMaxQueue = maxOf(globalMaxQueue, queueTotal)
             states.forEach { (connectionId, state) ->
                 val lane = laneByMovement[connectionId]
@@ -409,7 +425,10 @@ object TrafficSimulationEngine {
                         )
                     }
                 }
-                snapshots += TrafficSimulationSnapshot(time, visible.take(500), queueTotal, totalDepartures)
+                snapshots += TrafficSimulationSnapshot(
+                    time, visible.take(500), queueTotal, totalDepartures,
+                    laneVehicleTotal, physicalLanes.sumOf { it.upstreamQueue.size }
+                )
                 snapshotAt += 1.0
             }
             time += step
@@ -444,11 +463,22 @@ object TrafficSimulationEngine {
         }
         val totalDelay = movementMetrics.sumOf { it.totalDelayVehicleHours }
         val totalDelaySeconds = movementMetrics.sumOf { it.averageDelaySeconds * it.arrivals }
+        val physicalLaneVehiclesAtEnd = physicalLanes.sumOf { it.vehicles.size }
+        val upstreamQueueAtEnd = physicalLanes.sumOf { it.upstreamQueue.size }
+        val occupiedAtEnd = physicalLanes.sumOf { lane ->
+            lane.vehicles.sumOf { it.model.lengthMeters } +
+                (lane.vehicles.size - 1).coerceAtLeast(0) * demand.minimumGapMeters
+        }
+        val capacityAtEnd = physicalLanes.size * demand.approachStorageLengthMeters
+        val storageUtilizationAtEnd = if (capacityAtEnd <= 0.0) 0.0
+            else (occupiedAtEnd / capacityAtEnd * 100.0).coerceIn(0.0, 100.0)
         return TrafficSimulationResult(
             demand.durationSeconds, timing.cycleLengthSeconds, totalArrivals, totalDepartures,
-            physicalLanes.sumOf { it.vehicles.size + it.upstreamQueue.size }, globalMaxQueue,
+            physicalLaneVehiclesAtEnd + upstreamQueueAtEnd, globalMaxQueue,
             if (totalArrivals == 0) 0.0 else totalDelaySeconds / totalArrivals,
-            totalDelay, movementMetrics, categoryMetrics, snapshots, diagnostics.distinct()
+            totalDelay, movementMetrics, categoryMetrics, snapshots, diagnostics.distinct(),
+            physicalLaneVehiclesAtEnd, upstreamQueueAtEnd, storageUtilizationAtEnd,
+            maximumLaneStorageUtilizationPercent
         )
     }
 
