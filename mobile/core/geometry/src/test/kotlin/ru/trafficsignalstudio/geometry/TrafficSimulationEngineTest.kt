@@ -131,7 +131,7 @@ class TrafficSimulationEngineTest {
         MovementTrafficDemand("m1", 100.0, mapOf(VehicleClass.CITY_BUS to 120.0))
     }
 
-    @Test fun visualVehicleEnvelopeContactCreatesCrashEvenWithoutRiskTriggeredEvent() {
+    @Test fun conflictingVehiclesBrakeBeforeTheirVisualEnvelopesTouch() {
         fun lane(id: String, flow: LaneFlowDirection) = Lane(
             id = id,
             index = 0,
@@ -181,9 +181,13 @@ class TrafficSimulationEngineTest {
             approachStorageLengthMeters = 40.0,
             approachSpeedKmh = 50.0
         ))
-        assertTrue(
-            "Actual overlap of rendered vehicle bodies must be recorded as a collision",
+        assertFalse(
+            "Predictive braking should prevent physical contact between conflicting moving streams",
             result.crashIncidents.any { it.cause == CrashIncidentCause.PHYSICAL_CONTACT }
+        )
+        assertTrue(
+            "Simulation should retain moving traffic while conflicting vehicles yield",
+            result.snapshots.flatMap { it.activeVehicles }.any { it.speedMetersPerSecond > 0.5 }
         )
     }
 }
