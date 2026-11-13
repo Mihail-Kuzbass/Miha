@@ -229,6 +229,20 @@ object TrafficSimulationEngine {
         }
 
         val trajectories = TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection).associateBy { it.connectionId }
+        // Cache polyline geometry once per movement. Rebuilding segment-length
+        // lists inside worldPose() was allocating repeatedly for every vehicle
+        // and every predictive-collision sample.
+        data class CachedPath(
+            val points: List<Point2D>,
+            val segmentLengths: DoubleArray,
+            val totalLengthMeters: Double
+        )
+        val cachedPaths = trajectories.mapValues { (_, trajectory) ->
+            val lengths = trajectory.points.zipWithNext().map { (a, b) ->
+                hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters).coerceAtLeast(1e-6)
+            }.toDoubleArray()
+            CachedPath(trajectory.points, lengths, lengths.sum().coerceAtLeast(1e-6))
+        }
         val connections = intersection.laneConnections.associateBy { it.id }
         // Keep a physical state for every valid lane connection, including
         // connections with zero demand. Otherwise an empty adjacent lane cannot
@@ -239,7 +253,7 @@ object TrafficSimulationEngine {
         }
         val states = trajectories.values.associate { trajectory ->
             val connection = connections.getValue(trajectory.connectionId)
-            val length = trajectory.points.let(::polylineLength).coerceAtLeast(8.0)
+            val length = cachedPaths.getValue(trajectory.connectionId).totalLengthMeters.coerceAtLeast(8.0)
             trajectory.connectionId to MovementState(
                 trajectory.connectionId,
                 connection.fromApproachId,
@@ -362,9 +376,10 @@ object TrafficSimulationEngine {
 
 
         fun pathPose(connectionId: String, progress: Double): Pair<Point2D, Point2D> {
-            val points = trajectories.getValue(connectionId).points
-            val lengths = points.zipWithNext().map { (a, b) -> hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters) }
-            var distanceAlong = progress * lengths.sum().coerceAtLeast(1e-6)
+            val geometry = cachedPaths.getValue(connectionId)
+            val points = geometry.points
+            val lengths = geometry.segmentLengths
+            var distanceAlong = progress * geometry.totalLengthMeters
             var segmentIndex = 0
             if (distanceAlong >= 0.0) {
                 while (segmentIndex < lengths.lastIndex && distanceAlong > lengths[segmentIndex]) {
@@ -374,7 +389,7 @@ object TrafficSimulationEngine {
             }
             val a = points[segmentIndex]
             val b = points[segmentIndex + 1]
-            val segmentLength = lengths[segmentIndex].coerceAtLeast(1e-6)
+            val segmentLength = lengths[segmentIndex]
             val ratio = if (progress < 0.0 || distanceAlong > segmentLength)
                 distanceAlong / segmentLength else (distanceAlong / segmentLength).coerceIn(0.0, 1.0)
             val dx = (b.xMeters - a.xMeters) / segmentLength
