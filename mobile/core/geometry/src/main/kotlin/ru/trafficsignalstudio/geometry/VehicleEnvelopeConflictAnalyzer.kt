@@ -21,18 +21,42 @@ object VehicleEnvelopeConflictAnalyzer {
     }
 
     fun analyze(trajectories: List<MovementTrajectory>): List<SweptEnvelopeConflict> {
+        data class Segment(
+            val start: Point2D,
+            val end: Point2D,
+            val minX: Double,
+            val maxX: Double,
+            val minY: Double,
+            val maxY: Double
+        )
+        val segmentsByConnection = trajectories.associate { trajectory ->
+            trajectory.connectionId to trajectory.points.zipWithNext().map { (start, end) ->
+                Segment(
+                    start, end,
+                    minOf(start.xMeters, end.xMeters), maxOf(start.xMeters, end.xMeters),
+                    minOf(start.yMeters, end.yMeters), maxOf(start.yMeters, end.yMeters)
+                )
+            }
+        }
         val results = mutableListOf<SweptEnvelopeConflict>()
         for (i in trajectories.indices) for (j in i + 1 until trajectories.size) {
             val first = trajectories[i]
             val second = trajectories[j]
             if (first.connectionId == second.connectionId || first.points.size < 2 || second.points.size < 2) continue
+            val required = (first.vehicleWidthMeters + second.vehicleWidthMeters) / 2.0
+            val firstSegments = segmentsByConnection[first.connectionId].orEmpty()
+            val secondSegments = segmentsByConnection[second.connectionId].orEmpty()
             var closest: PairPoints? = null
-            for (a in first.points.zipWithNext()) for (b in second.points.zipWithNext()) {
-                val candidate = closestPair(a.first, a.second, b.first, b.second)
+            for (a in firstSegments) for (b in secondSegments) {
+                // Conservative AABB rejection: if the expanded segment boxes
+                // cannot approach within the required half-width clearance, the
+                // exact segment-distance calculation cannot produce a conflict.
+                if (a.maxX + required < b.minX || b.maxX + required < a.minX ||
+                    a.maxY + required < b.minY || b.maxY + required < a.minY) continue
+                val candidate = closestPair(a.start, a.end, b.start, b.end)
                 if (closest == null || candidate.distance < closest.distance) closest = candidate
             }
             val pair = closest ?: continue
-            val required = (first.vehicleWidthMeters + second.vehicleWidthMeters) / 2.0
             if (pair.distance + 1e-6 < required) results += SweptEnvelopeConflict(
                 first.connectionId, second.connectionId, pair.distance, required, pair.midpoint, pair.distance <= 1e-6
             )
