@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -299,6 +300,8 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                                 }
                                 result = computed
                                 selectedSnapshotIndex = 0
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
                             } catch (error: Exception) {
                                 inputError = error.message ?: "Не удалось выполнить моделирование"
                             } finally {
