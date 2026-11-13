@@ -53,6 +53,7 @@ import ru.trafficsignalstudio.model.LaneTravelDirection
 import ru.trafficsignalstudio.geometry.TrajectoryConflictAnalyzer
 import ru.trafficsignalstudio.geometry.TrajectoryConflictKind
 import ru.trafficsignalstudio.geometry.ConflictSignalStatus
+import ru.trafficsignalstudio.geometry.MovementTrajectory
 import ru.trafficsignalstudio.model.SignalPhase
 import ru.trafficsignalstudio.model.SignalPlan
 import ru.trafficsignalstudio.model.ProjectDocument
@@ -146,6 +147,8 @@ fun IntersectionEditorScreen(
                     IntersectionGeometryPreview(
                         modifier = Modifier.fillMaxSize(),
                         intersection = intersection,
+                        movementTrajectories = movementTrajectories,
+                        movementConflicts = movementConflicts,
                         pendingPoints = pendingPoints,
                         drawingTool = drawingTool,
                         onAddPoint = { point -> pendingPoints.add(snapToNetwork(point, intersection)) },
@@ -748,6 +751,8 @@ fun IntersectionEditorScreen(
 private fun IntersectionGeometryPreview(
     modifier: Modifier = Modifier,
     intersection: Intersection,
+    movementTrajectories: List<MovementTrajectory>,
+    movementConflicts: List<ru.trafficsignalstudio.geometry.MovementTrajectoryConflict>,
     pendingPoints: List<Point2D>,
     drawingTool: DrawingTool, onAddPoint: (Point2D) -> Unit,
     zoom: Float, pan: Offset, editMode: Boolean, selectedSegmentId: String?,
@@ -972,45 +977,35 @@ private fun IntersectionGeometryPreview(
             }
         }
 
-        intersection.laneConnections.forEach { connection ->
-            val sourceApproach = intersection.approaches.firstOrNull { it.id == connection.fromApproachId }
-            val sourceLane = sourceApproach?.lanes?.firstOrNull { it.id == connection.fromLaneId }
-            val targetApproach = intersection.approaches.firstOrNull { it.id == connection.toApproachId }
-            val targetLane = targetApproach?.lanes?.firstOrNull { it.id == connection.toLaneId }
-            if (sourceApproach != null && sourceLane != null && targetApproach != null && targetLane != null) {
-                fun laneEndpoint(approach: ru.trafficsignalstudio.model.Approach, lane: ru.trafficsignalstudio.model.Lane): Offset {
-                    val ordered = approach.lanes.sortedBy { it.index }
-                    var laneOffset = -ordered.sumOf { it.widthMeters }.toFloat() * scale / 2f
-                    ordered.takeWhile { it.id != lane.id }.forEach { laneOffset += it.widthMeters.toFloat() * scale }
-                    laneOffset += lane.widthMeters.toFloat() * scale / 2f
-                    val localY = -junctionHalf - 22f
-                    val angle = Math.toRadians(approach.headingDegrees)
-                    val x = laneOffset.toDouble()
-                    val y = localY.toDouble()
-                    return Offset(
-                        center.x + (x * kotlin.math.cos(angle) - y * kotlin.math.sin(angle)).toFloat(),
-                        center.y + (x * kotlin.math.sin(angle) + y * kotlin.math.cos(angle)).toFloat()
-                    )
+        movementTrajectories.forEach { trajectory ->
+            val path = Path().apply {
+                val first = trajectory.points.first()
+                moveTo(center.x + first.xMeters.toFloat() * scale * 0.35f,
+                    center.y - first.yMeters.toFloat() * scale * 0.35f)
+                trajectory.points.drop(1).forEach { point ->
+                    lineTo(center.x + point.xMeters.toFloat() * scale * 0.35f,
+                        center.y - point.yMeters.toFloat() * scale * 0.35f)
                 }
-                val start = laneEndpoint(sourceApproach, sourceLane)
-                val end = laneEndpoint(targetApproach, targetLane)
-                val path = Path().apply {
-                    moveTo(start.x, start.y)
-                    quadraticTo(center.x, center.y, end.x, end.y)
-                }
-                val routeColor = Color(0xFF80D8FF)
-                drawPath(path, routeColor, style = Stroke(width = 3.5f, cap = StrokeCap.Round))
-                val dx = end.x - center.x
-                val dy = end.y - center.y
-                val length = kotlin.math.hypot(dx, dy).coerceAtLeast(1f)
+            }
+            val hasSimultaneousConflict = movementConflicts.any {
+                it.signalStatus == ConflictSignalStatus.SIMULTANEOUS_GREEN &&
+                    (it.firstConnectionId == trajectory.connectionId || it.secondConnectionId == trajectory.connectionId)
+            }
+            val routeColor = if (hasSimultaneousConflict) Color(0xFFFF5252) else Color(0xFF80D8FF)
+            drawPath(path, routeColor, style = Stroke(width = 3.5f, cap = StrokeCap.Round))
+            if (trajectory.points.size >= 2) {
+                val before = trajectory.points[trajectory.points.lastIndex - 1]
+                val tip = trajectory.points.last()
+                val dx = (tip.xMeters - before.xMeters).toFloat()
+                val dy = -(tip.yMeters - before.yMeters).toFloat()
+                val length = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001f)
                 val ux = dx / length
                 val uy = dy / length
-                val baseX = end.x - ux * 11f
-                val baseY = end.y - uy * 11f
-                val wingX = -uy * 5f
-                val wingY = ux * 5f
-                drawLine(routeColor, end, Offset(baseX + wingX, baseY + wingY), 3f, cap = StrokeCap.Round)
-                drawLine(routeColor, end, Offset(baseX - wingX, baseY - wingY), 3f, cap = StrokeCap.Round)
+                val end = Offset(center.x + tip.xMeters.toFloat() * scale * 0.35f,
+                    center.y - tip.yMeters.toFloat() * scale * 0.35f)
+                val base = Offset(end.x - ux * 10f, end.y - uy * 10f)
+                drawLine(routeColor, end, Offset(base.x - uy * 5f, base.y + ux * 5f), 3f, cap = StrokeCap.Round)
+                drawLine(routeColor, end, Offset(base.x + uy * 5f, base.y - ux * 5f), 3f, cap = StrokeCap.Round)
             }
         }
 
