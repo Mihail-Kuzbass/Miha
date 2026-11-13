@@ -233,7 +233,8 @@ object TrafficSimulationEngine {
                         SimulatedVehicle(active.waiting.id, state.connectionId, active.waiting.vehicleClass, progress, false, 0)
                     }
                 }
-                snapshots += TrafficSimulationSnapshot(time, visible, queueTotal, totalDepartures)
+                // Keep animation memory bounded on long, oversaturated scenarios.
+                snapshots += TrafficSimulationSnapshot(time, visible.take(500), queueTotal, totalDepartures)
                 snapshotAt += 1.0
             }
             time += step
