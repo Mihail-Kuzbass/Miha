@@ -214,10 +214,11 @@ private fun IntersectionGeometryPreview(
 ) {
     Canvas(modifier = modifier.background(Color(0xFFE8EEE8), RoundedCornerShape(12.dp))) {
         val center = Offset(size.width / 2f, size.height / 2f)
-        val maxRoadWidthMeters = intersection.approaches.maxOfOrNull {
-            it.lanes.sumOf { lane -> lane.widthMeters }
-        } ?: 7.0
-        val scale = size.minDimension * 0.34f / maxRoadWidthMeters.coerceAtLeast(1.0).toFloat()
+        // Keep the drawing scale independent from the current lane count.
+        // Otherwise the widest road is always normalized to the same pixel width,
+        // making lane-count edits visually indistinguishable.
+        val referenceRoadWidthMeters = 14.0f // 4 lanes × 3.5 m
+        val scale = size.minDimension * 0.28f / referenceRoadWidthMeters
         val roadWidths = intersection.approaches.associate { approach ->
             approach.id to (approach.lanes.sumOf { it.widthMeters }.toFloat() * scale).coerceAtLeast(24f)
         }
@@ -228,25 +229,41 @@ private fun IntersectionGeometryPreview(
             val heading = ((approach.headingDegrees % 360.0) + 360.0) % 360.0
             val roadWidth = roadWidths[approach.id] ?: 24f
             val half = roadWidth / 2f
+            val laneDividerOffsets = approach.lanes.dropLast(1).runningFold(-half) { offset, lane ->
+                offset + lane.widthMeters.toFloat() * scale
+            }.drop(1)
+
             when {
                 heading < 45.0 || heading >= 315.0 -> {
                     drawRect(Color(0xFF59616A), Offset(center.x - half, 0f), Size(roadWidth, center.y))
-                    drawLine(Color.White, Offset(center.x, 0f), Offset(center.x, center.y - junctionHalf), 2f, pathEffect = dash)
+                    laneDividerOffsets.forEach { offset ->
+                        val x = center.x + offset
+                        drawLine(Color.White, Offset(x, 0f), Offset(x, center.y - junctionHalf), 2f, pathEffect = dash)
+                    }
                     drawLine(Color.White, Offset(center.x - half, center.y - junctionHalf - 16f), Offset(center.x + half, center.y - junctionHalf - 16f), 4f)
                 }
                 heading >= 135.0 && heading < 225.0 -> {
                     drawRect(Color(0xFF59616A), Offset(center.x - half, center.y), Size(roadWidth, size.height - center.y))
-                    drawLine(Color.White, Offset(center.x, center.y + junctionHalf), Offset(center.x, size.height), 2f, pathEffect = dash)
+                    laneDividerOffsets.forEach { offset ->
+                        val x = center.x + offset
+                        drawLine(Color.White, Offset(x, center.y + junctionHalf), Offset(x, size.height), 2f, pathEffect = dash)
+                    }
                     drawLine(Color.White, Offset(center.x - half, center.y + junctionHalf + 16f), Offset(center.x + half, center.y + junctionHalf + 16f), 4f)
                 }
                 heading >= 45.0 && heading < 135.0 -> {
                     drawRect(Color(0xFF59616A), Offset(center.x, center.y - half), Size(size.width - center.x, roadWidth))
-                    drawLine(Color.White, Offset(center.x + junctionHalf, center.y), Offset(size.width, center.y), 2f, pathEffect = dash)
+                    laneDividerOffsets.forEach { offset ->
+                        val y = center.y + offset
+                        drawLine(Color.White, Offset(center.x + junctionHalf, y), Offset(size.width, y), 2f, pathEffect = dash)
+                    }
                     drawLine(Color.White, Offset(center.x + junctionHalf + 16f, center.y - half), Offset(center.x + junctionHalf + 16f, center.y + half), 4f)
                 }
                 else -> {
                     drawRect(Color(0xFF59616A), Offset(0f, center.y - half), Size(center.x, roadWidth))
-                    drawLine(Color.White, Offset(0f, center.y), Offset(center.x - junctionHalf, center.y), 2f, pathEffect = dash)
+                    laneDividerOffsets.forEach { offset ->
+                        val y = center.y + offset
+                        drawLine(Color.White, Offset(0f, y), Offset(center.x - junctionHalf, y), 2f, pathEffect = dash)
+                    }
                     drawLine(Color.White, Offset(center.x - junctionHalf - 16f, center.y - half), Offset(center.x - junctionHalf - 16f, center.y + half), 4f)
                 }
             }
