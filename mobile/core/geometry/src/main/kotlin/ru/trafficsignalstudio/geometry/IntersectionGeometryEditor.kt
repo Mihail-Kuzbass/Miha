@@ -124,7 +124,15 @@ object IntersectionGeometryEditor {
         if (segment.lanes.isNotEmpty()) return segment.lanes.sortedBy { it.index }
         val count = segment.laneCount.coerceIn(1, 16)
         val laneWidth = segment.widthMeters / count
-        return (0 until count).map { index -> RoadSegmentLane(id = "${segment.id}-lane-${index + 1}", index = index + 1, widthMeters = laneWidth) }
+        return (0 until count).map { index ->
+            RoadSegmentLane(
+                id = "${segment.id}-lane-${index + 1}",
+                index = index + 1,
+                widthMeters = laneWidth,
+                travelDirection = if (index < (count + 1) / 2)
+                    LaneTravelDirection.ALONG_CENTERLINE else LaneTravelDirection.AGAINST_CENTERLINE
+            )
+        }
     }
 
     fun setRoadLaneCount(intersection: Intersection, segmentId: String, count: Int): Intersection {
