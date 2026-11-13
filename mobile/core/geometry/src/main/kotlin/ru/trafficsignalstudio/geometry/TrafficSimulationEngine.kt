@@ -1,16 +1,17 @@
 package ru.trafficsignalstudio.geometry
 
 import ru.trafficsignalstudio.model.Intersection
+import ru.trafficsignalstudio.model.LaneConnection
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.VehicleClass
+import ru.trafficsignalstudio.model.VehicleModel
 import ru.trafficsignalstudio.model.VehicleModelCatalog
-import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sqrt
+import kotlin.math.hypot
 
-/**
- * Total flow includes the explicitly classified flows. Any remainder is kept as
- * unclassified demand (rendered with the default passenger-car silhouette only).
- */
 data class MovementTrafficDemand(
     val connectionId: String,
     val totalVehiclesPerHour: Double,
@@ -18,8 +19,8 @@ data class MovementTrafficDemand(
 ) {
     init {
         require(connectionId.isNotBlank())
-        require(totalVehiclesPerHour >= 0.0)
-        require(categoryFlowsPerHour.values.all { it >= 0.0 })
+        require(totalVehiclesPerHour.isFinite() && totalVehiclesPerHour >= 0.0)
+        require(categoryFlowsPerHour.values.all { it.isFinite() && it >= 0.0 })
         require(categoryFlowsPerHour.values.sum() <= totalVehiclesPerHour + 1e-6) {
             "Сумма интенсивностей по категориям не может превышать общую интенсивность"
         }
@@ -32,11 +33,17 @@ data class MovementTrafficDemand(
 data class TrafficSimulationDemand(
     val movements: List<MovementTrafficDemand>,
     val durationSeconds: Int = 900,
-    val timeStepSeconds: Double = 0.5
+    val timeStepSeconds: Double = 0.25,
+    val approachStorageLengthMeters: Double = 120.0,
+    val minimumGapMeters: Double = 2.0,
+    val desiredHeadwaySeconds: Double = 1.2
 ) {
     init {
         require(durationSeconds in 60..7200)
-        require(timeStepSeconds in 0.1..2.0)
+        require(timeStepSeconds in 0.05..1.0)
+        require(approachStorageLengthMeters in 20.0..1000.0)
+        require(minimumGapMeters in 0.5..10.0)
+        require(desiredHeadwaySeconds in 0.5..3.0)
         require(movements.map { it.connectionId }.distinct().size == movements.size)
     }
 }
@@ -45,10 +52,15 @@ data class SimulatedVehicle(
     val id: Long,
     val connectionId: String,
     val vehicleClass: VehicleClass?,
-    /** 0..1 on the movement path; negative values represent a queued vehicle before the stop line. */
+    /** 0..1 on the movement path; negative values are measured upstream from the stop line. */
     val progress: Double,
     val queued: Boolean,
-    val queueIndex: Int
+    val queueIndex: Int,
+    val lengthMeters: Double = 4.6,
+    val widthMeters: Double = 1.8,
+    val speedKmh: Double = 0.0,
+    /** Distance from the stop line; meaningful for vehicles still on the approach. */
+    val distanceToStopLineMeters: Double? = null
 )
 
 data class MovementSimulationMetrics(
@@ -94,26 +106,34 @@ data class TrafficSimulationResult(
 }
 
 /**
- * Deterministic, fixed-time-step queue simulation for signalized lane connections.
- * It is an initial macroscopic/mesoscopic screening model, not a calibrated
- * car-following or normative capacity model.
+ * Fixed-step longitudinal traffic simulation.
+ *
+ * Vehicles occupy a shared physical approach lane, are inserted only when their
+ * complete body fits into the modeled storage, follow a leader using an IDM-style
+ * car-following equation, stop at red, and enter their movement path only on green.
+ * This is a deterministic engineering model, not yet a calibrated microsimulation.
  */
 object TrafficSimulationEngine {
     private data class WaitingVehicle(
         val id: Long,
+        val connectionId: String,
         val vehicleClass: VehicleClass?,
         val arrivalTime: Double,
-        val lengthMeters: Double
+        val model: VehicleModel,
+        var distanceToStopLineMeters: Double = 0.0,
+        var speedMps: Double = 0.0
     )
 
     private data class ActiveVehicle(
         val waiting: WaitingVehicle,
-        val departureTime: Double,
-        val travelTime: Double
+        var distanceAlongPathMeters: Double = 0.0,
+        var speedMps: Double = 0.0
     )
 
-    private class MovementState(val connectionId: String, val pathLength: Double) {
-        val queue = ArrayDeque<WaitingVehicle>()
+    private class MovementState(
+        val connection: LaneConnection,
+        val pathLengthMeters: Double
+    ) {
         val active = mutableListOf<ActiveVehicle>()
         var arrivals = 0
         var departures = 0
@@ -123,12 +143,21 @@ object TrafficSimulationEngine {
         var nextDepartureTime = 0.0
     }
 
+    private class PhysicalLaneState(
+        val key: String,
+        val movements: List<String>
+    ) {
+        /** Sorted by distance to stop line: front-most vehicle first. */
+        val vehicles = mutableListOf<WaitingVehicle>()
+        val upstreamQueue = ArrayDeque<WaitingVehicle>()
+    }
+
     fun run(intersection: Intersection, demand: TrafficSimulationDemand): TrafficSimulationResult {
         val diagnostics = mutableListOf<String>()
         val timing = SignalPlanTimingAnalyzer.analyze(intersection)
         val signalPlan = intersection.signalPlan
         if (!timing.isValid) diagnostics += timing.diagnostics.map { it.message }
-        if (timing.cycleLengthSeconds <= 0 || intersection.signalPlan?.enabled != true) {
+        if (timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) {
             diagnostics += "Нет действующего циклического светофорного плана: выпуск из очередей не выполняется."
         }
         TrajectoryConflictAnalyzer.analyzeMovementConflicts(intersection).forEach { conflict ->
@@ -140,32 +169,49 @@ object TrafficSimulationEngine {
                 else -> Unit
             }
         }
+
         val trajectories = TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection)
             .associateBy { it.connectionId }
-        val knownConnections = intersection.laneConnections.map { it.id }.toSet()
-        val configured = demand.movements.filter { it.connectionId in knownConnections }
+        val knownConnections = intersection.laneConnections.associateBy { it.id }
+        val configured = demand.movements.mapNotNull { item ->
+            knownConnections[item.connectionId]?.let { it to item }
+        }
         if (configured.size != demand.movements.size) {
             diagnostics += "Часть потоков ссылается на отсутствующие связи полос и не включена в расчёт."
         }
-        val states = configured.associate { item ->
-            val length = trajectories[item.connectionId]?.points?.let(::polylineLength)?.coerceAtLeast(8.0) ?: 20.0
-            item.connectionId to MovementState(item.connectionId, length)
+
+        val states = configured.associate { (connection, _) ->
+            val pathLength = trajectories[connection.id]?.points?.let(::polylineLength)?.coerceAtLeast(8.0) ?: 20.0
+            connection.id to MovementState(connection, pathLength)
         }
+        val laneStates = configured.groupBy { (_, _) ->
+            val connection = configured.first { it.first.id == it.first.id }.first
+            "${connection.fromApproachId}|${connection.fromLaneId}"
+        }
+        // Group from the actual source lane; movements sharing it share one physical queue.
+        val physicalLanes = configured.groupBy { (connection, _) ->
+            "${connection.fromApproachId}|${connection.fromLaneId}"
+        }.mapValues { (key, entries) ->
+            PhysicalLaneState(key, entries.map { it.first.id })
+        }.values
+
         var nextId = 1L
         val nextArrival = mutableMapOf<Pair<String, VehicleClass?>, Double>()
-        configured.forEach { movement ->
-            val residual = movement.unclassifiedVehiclesPerHour
-            val streams = mutableListOf<Pair<VehicleClass?, Double>>()
-            streams += movement.categoryFlowsPerHour.map { it.key to it.value }
-            if (residual > 1e-6) streams += null to residual
+        configured.forEach { (connection, movement) ->
+            val streams = movement.categoryFlowsPerHour.map { it.key to it.value }.toMutableList()
+            if (movement.unclassifiedVehiclesPerHour > 1e-6) {
+                streams += null to movement.unclassifiedVehiclesPerHour
+            }
             streams.forEach { (vehicleClass, rate) ->
-                if (rate > 0.0) nextArrival[movement.connectionId to vehicleClass] = 3600.0 / rate
+                if (rate > 0.0) nextArrival[connection.id to vehicleClass] = 3600.0 / rate
             }
         }
+
         val categoryArrivals = mutableMapOf<VehicleClass?, Int>()
         val categoryDepartures = mutableMapOf<VehicleClass?, Int>()
         val categoryDelay = mutableMapOf<VehicleClass?, Double>()
         val snapshots = mutableListOf<TrafficSimulationSnapshot>()
+        val laneByMovement = physicalLanes.flatMap { lane -> lane.movements.map { it to lane } }.toMap()
         var time = 0.0
         var totalArrivals = 0
         var totalDepartures = 0
@@ -175,107 +221,238 @@ object TrafficSimulationEngine {
         fun greenFor(connectionId: String, atSeconds: Double): Boolean {
             if (!timing.isValid || timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) return false
             val cycleTime = atSeconds % timing.cycleLengthSeconds
-            val phase = timing.phaseWindows.firstOrNull { window ->
+            return timing.phaseWindows.any { window ->
                 cycleTime >= window.startSeconds && cycleTime < window.greenEndSeconds &&
                     signalPlan.phases.firstOrNull { it.id == window.phaseId }
                         ?.greenConnectionIds?.contains(connectionId) == true
             }
-            return phase != null
         }
+
+        fun modelFor(vehicleClass: VehicleClass?): VehicleModel =
+            vehicleClass?.let { cls -> VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls } }
+                ?: VehicleModelCatalog.defaultPassengerCar
+
+        fun canEnterStorage(lane: PhysicalLaneState, vehicle: WaitingVehicle): Boolean {
+            val farthest = lane.vehicles.maxByOrNull { it.distanceToStopLineMeters }
+            val candidateFront = if (farthest == null) {
+                demand.approachStorageLengthMeters - vehicle.model.lengthMeters
+            } else {
+                farthest.distanceToStopLineMeters + farthest.model.lengthMeters + demand.minimumGapMeters
+            }
+            return candidateFront + vehicle.model.lengthMeters <= demand.approachStorageLengthMeters + 1e-6
+        }
+
+        fun laneQueueCount(lane: PhysicalLaneState, connectionId: String): Int =
+            lane.vehicles.count { it.connectionId == connectionId } +
+                lane.upstreamQueue.count { it.connectionId == connectionId }
 
         val step = demand.timeStepSeconds
         while (time <= demand.durationSeconds + 1e-9) {
-            configured.forEach { movement ->
-                val state = states.getValue(movement.connectionId)
+            // Demand arrivals enter a shared upstream reservoir for their source lane.
+            configured.forEach { (connection, movement) ->
+                val lane = laneByMovement.getValue(connection.id)
                 val streams = movement.categoryFlowsPerHour.map { it.key to it.value } +
                     listOf(null to movement.unclassifiedVehiclesPerHour)
-                streams.forEach { (vehicleClass, rate) ->
-                    if (rate <= 0.0) return@forEach
-                    val key = movement.connectionId to vehicleClass
+                streams.forEach streamLoop@{ (vehicleClass, rate) ->
+                    if (rate <= 0.0) return@streamLoop
+                    val key = connection.id to vehicleClass
                     val interval = 3600.0 / rate
                     var arrival = nextArrival[key] ?: interval
                     while (arrival <= time + 1e-9) {
-                        val model = vehicleClass?.let { cls -> VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls } }
-                            ?: VehicleModelCatalog.defaultPassengerCar
-                        state.queue.addLast(WaitingVehicle(nextId++, vehicleClass, arrival, model.lengthMeters))
-                        state.arrivals++
+                        val vehicle = WaitingVehicle(nextId++, connection.id, vehicleClass, arrival, modelFor(vehicleClass))
+                        lane.upstreamQueue.addLast(vehicle)
+                        states.getValue(connection.id).arrivals++
                         totalArrivals++
                         categoryArrivals[vehicleClass] = (categoryArrivals[vehicleClass] ?: 0) + 1
                         arrival += interval
                     }
                     nextArrival[key] = arrival
                 }
-                state.maxQueue = maxOf(state.maxQueue, state.queue.size)
-                if (state.queue.isNotEmpty() && greenFor(movement.connectionId, time) &&
-                    time + 1e-9 >= state.nextDepartureTime) {
-                    val vehicle = state.queue.removeFirst()
-                    val model = vehicle.vehicleClass?.let { cls -> VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == cls } }
-                        ?: VehicleModelCatalog.defaultPassengerCar
-                    val delay = (time - vehicle.arrivalTime).coerceAtLeast(0.0)
-                    val speedMps = min(model.maximumSpeedKmh, 30.0) / 3.6
-                    val travelTime = state.pathLength / speedMps.coerceAtLeast(2.0)
-                    state.active += ActiveVehicle(vehicle, time, travelTime)
-                    state.nextDepartureTime = time + 1.8 + model.lengthMeters / 35.0
-                    state.departures++
-                    totalDepartures++
-                    state.delaySum += delay
-                    state.delayVehicleHours += delay / 3600.0
-                    categoryDepartures[vehicle.vehicleClass] = (categoryDepartures[vehicle.vehicleClass] ?: 0) + 1
-                    categoryDelay[vehicle.vehicleClass] = (categoryDelay[vehicle.vehicleClass] ?: 0.0) + delay
+            }
+
+            // Feed upstream demand into the finite physical lane storage when a full body fits.
+            physicalLanes.forEach { lane ->
+                while (lane.upstreamQueue.isNotEmpty()) {
+                    val candidate = lane.upstreamQueue.first()
+                    if (!canEnterStorage(lane, candidate)) break
+                    lane.upstreamQueue.removeFirst()
+                    candidate.distanceToStopLineMeters = if (lane.vehicles.isEmpty()) {
+                        demand.approachStorageLengthMeters - candidate.model.lengthMeters
+                    } else {
+                        val farthest = lane.vehicles.maxBy { it.distanceToStopLineMeters }
+                        farthest.distanceToStopLineMeters + farthest.model.lengthMeters + demand.minimumGapMeters
+                    }
+                    lane.vehicles += candidate
+                    lane.vehicles.sortBy { it.distanceToStopLineMeters }
                 }
+            }
+
+            // Update each lane from its leader to its followers. No two vehicle bodies overlap.
+            physicalLanes.forEach { lane ->
+                var index = 0
+                while (index < lane.vehicles.size) {
+                    val vehicle = lane.vehicles[index]
+                    val state = states.getValue(vehicle.connectionId)
+                    val leader = if (index > 0) lane.vehicles[index - 1] else null
+                    val green = greenFor(vehicle.connectionId, time) &&
+                        time + 1e-9 >= state.nextDepartureTime
+                    val desiredSpeed = min(vehicle.model.maximumSpeedKmh, 50.0) / 3.6
+                    val maxAcceleration = vehicle.model.accelerationMetersPerSecondSquared.coerceAtLeast(0.1)
+                    val comfortableDeceleration = vehicle.model.serviceDecelerationMetersPerSecondSquared.coerceAtLeast(0.5)
+                    val gap: Double
+                    val leaderSpeed: Double
+                    if (leader != null) {
+                        gap = (vehicle.distanceToStopLineMeters -
+                            (leader.distanceToStopLineMeters + leader.model.lengthMeters)).coerceAtLeast(0.05)
+                        leaderSpeed = leader.speedMps
+                    } else if (!green) {
+                        gap = vehicle.distanceToStopLineMeters.coerceAtLeast(0.05)
+                        leaderSpeed = 0.0
+                    } else {
+                        gap = Double.POSITIVE_INFINITY
+                        leaderSpeed = vehicle.speedMps
+                    }
+
+                    val speed = vehicle.speedMps
+                    val closingSpeed = speed - leaderSpeed
+                    val desiredGap = if (gap.isInfinite()) 0.0 else {
+                        val dynamicGap = speed * demand.desiredHeadwaySeconds +
+                            speed * closingSpeed / (2.0 * sqrt(maxAcceleration * comfortableDeceleration))
+                        demand.minimumGapMeters + max(0.0, dynamicGap)
+                    }
+                    val interaction = if (gap.isInfinite()) 0.0 else (desiredGap / gap).pow(2.0)
+                    val freeRoad = if (desiredSpeed <= 0.0) 0.0 else (speed / desiredSpeed).pow(4.0)
+                    val acceleration = (maxAcceleration * (1.0 - freeRoad - interaction))
+                        .coerceIn(-comfortableDeceleration, maxAcceleration)
+                    val newSpeed = (speed + acceleration * step).coerceIn(0.0, desiredSpeed)
+                    val newPosition = vehicle.distanceToStopLineMeters -
+                        (speed + newSpeed) * 0.5 * step
+
+                    if (leader == null && green && newPosition <= 0.0) {
+                        val traveled = vehicle.distanceToStopLineMeters.coerceAtLeast(0.0)
+                        val crossingFraction = if (traveled <= 1e-9) 0.0 else
+                            (traveled / ((speed + newSpeed) * 0.5 * step).coerceAtLeast(1e-9)).coerceIn(0.0, 1.0)
+                        val departureTime = time + crossingFraction * step
+                        val delay = (departureTime - vehicle.arrivalTime).coerceAtLeast(0.0)
+                        state.active += ActiveVehicle(vehicle, 0.0, max(newSpeed, 1.0))
+                        state.departures++
+                        totalDepartures++
+                        state.delaySum += delay
+                        state.delayVehicleHours += delay / 3600.0
+                        categoryDepartures[vehicle.vehicleClass] = (categoryDepartures[vehicle.vehicleClass] ?: 0) + 1
+                        categoryDelay[vehicle.vehicleClass] = (categoryDelay[vehicle.vehicleClass] ?: 0.0) + delay
+                        state.nextDepartureTime = departureTime + max(0.9, 1.0 + vehicle.model.lengthMeters / 40.0)
+                        lane.vehicles.removeAt(index)
+                        continue
+                    }
+
+                    vehicle.speedMps = newSpeed
+                    vehicle.distanceToStopLineMeters = max(0.0, newPosition)
+                    index++
+                }
+
+                lane.upstreamQueue.firstOrNull()?.let { waiting ->
+                    // Upstream demand is physically queued; its delay is retained in the final statistics.
+                    if (waiting.distanceToStopLineMeters == 0.0) waiting.distanceToStopLineMeters = demand.approachStorageLengthMeters
+                }
+            }
+
+            // Vehicles already inside the junction advance along their own movement trajectories.
+            states.values.forEach { state ->
                 val iterator = state.active.iterator()
                 while (iterator.hasNext()) {
                     val active = iterator.next()
-                    if (time - active.departureTime >= active.travelTime) iterator.remove()
+                    val desiredSpeed = min(active.waiting.model.maximumSpeedKmh, 30.0) / 3.6
+                    val acceleration = active.waiting.model.accelerationMetersPerSecondSquared
+                    active.speedMps = min(desiredSpeed, active.speedMps + acceleration * step)
+                    active.distanceAlongPathMeters += active.speedMps * step
+                    if (active.distanceAlongPathMeters >= state.pathLengthMeters) iterator.remove()
                 }
             }
-            val queueTotal = states.values.sumOf { it.queue.size }
+
+            val queueTotal = physicalLanes.sumOf { it.vehicles.size + it.upstreamQueue.size }
             globalMaxQueue = maxOf(globalMaxQueue, queueTotal)
+            states.forEach { (connectionId, state) ->
+                val lane = laneByMovement[connectionId]
+                state.maxQueue = maxOf(state.maxQueue, lane?.let { laneQueueCount(it, connectionId) } ?: 0)
+            }
+
             if (time + 1e-9 >= snapshotAt) {
-                val visible = states.values.flatMap { state ->
-                    val pathLength = state.pathLength
-                    state.queue.mapIndexed { index, vehicle ->
-                        SimulatedVehicle(vehicle.id, state.connectionId, vehicle.vehicleClass,
-                            -(index + 1) * (vehicle.lengthMeters + 2.0) / pathLength, true, index)
-                    } + state.active.map { active ->
-                        val progress = ((time - active.departureTime) / active.travelTime).coerceIn(0.0, 1.0)
-                        SimulatedVehicle(active.waiting.id, state.connectionId, active.waiting.vehicleClass, progress, false, 0)
+                val visible = mutableListOf<SimulatedVehicle>()
+                physicalLanes.forEach { lane ->
+                    lane.vehicles.forEach { vehicle ->
+                        val state = states.getValue(vehicle.connectionId)
+                        val queueIndex = lane.vehicles.filter { it.connectionId == vehicle.connectionId }
+                            .sortedBy { it.distanceToStopLineMeters }.indexOf(vehicle)
+                        visible += SimulatedVehicle(
+                            vehicle.id, vehicle.connectionId, vehicle.vehicleClass,
+                            -vehicle.distanceToStopLineMeters / state.pathLengthMeters,
+                            vehicle.speedMps < 0.5, queueIndex,
+                            vehicle.model.lengthMeters, vehicle.model.widthMeters,
+                            vehicle.speedMps * 3.6, vehicle.distanceToStopLineMeters
+                        )
+                    }
+                    lane.upstreamQueue.forEachIndexed { index, vehicle ->
+                        val state = states.getValue(vehicle.connectionId)
+                        val distance = demand.approachStorageLengthMeters +
+                            (index + 1) * (vehicle.model.lengthMeters + demand.minimumGapMeters)
+                        visible += SimulatedVehicle(
+                            vehicle.id, vehicle.connectionId, vehicle.vehicleClass,
+                            -distance / state.pathLengthMeters, true, index,
+                            vehicle.model.lengthMeters, vehicle.model.widthMeters, 0.0, distance
+                        )
                     }
                 }
-                // Keep animation memory bounded on long, oversaturated scenarios.
+                states.forEach { (connectionId, state) ->
+                    state.active.forEach { active ->
+                        visible += SimulatedVehicle(
+                            active.waiting.id, connectionId, active.waiting.vehicleClass,
+                            (active.distanceAlongPathMeters / state.pathLengthMeters).coerceIn(0.0, 1.0),
+                            false, 0, active.waiting.model.lengthMeters, active.waiting.model.widthMeters,
+                            active.speedMps * 3.6, null
+                        )
+                    }
+                }
                 snapshots += TrafficSimulationSnapshot(time, visible.take(500), queueTotal, totalDepartures)
                 snapshotAt += 1.0
             }
             time += step
         }
-        // Include the waiting time accumulated by vehicles that are still queued at the end.
-        states.values.forEach { state ->
-            state.queue.forEach { vehicle ->
+
+        // Include delay accumulated by vehicles still on the modeled approach or in the upstream reservoir.
+        physicalLanes.forEach { lane ->
+            (lane.vehicles + lane.upstreamQueue).forEach { vehicle ->
                 val waitingSeconds = (demand.durationSeconds - vehicle.arrivalTime).coerceAtLeast(0.0)
+                val state = states.getValue(vehicle.connectionId)
                 state.delaySum += waitingSeconds
                 state.delayVehicleHours += waitingSeconds / 3600.0
                 categoryDelay[vehicle.vehicleClass] = (categoryDelay[vehicle.vehicleClass] ?: 0.0) + waitingSeconds
             }
         }
-        val movementMetrics = states.values.map { state ->
+
+        val movementMetrics = states.map { (connectionId, state) ->
+            val lane = laneByMovement[connectionId]
             MovementSimulationMetrics(
-                state.connectionId, state.arrivals, state.departures, state.queue.size, state.maxQueue,
+                connectionId, state.arrivals, state.departures,
+                lane?.let { laneQueueCount(it, connectionId) } ?: 0, state.maxQueue,
                 if (state.arrivals == 0) 0.0 else state.delaySum / state.arrivals,
                 state.delayVehicleHours
             )
         }
         val categoryMetrics = (categoryArrivals.keys + categoryDepartures.keys).distinct().map { cls ->
             val arrivals = categoryArrivals[cls] ?: 0
-            CategorySimulationMetrics(cls, arrivals, categoryDepartures[cls] ?: 0,
-                if (arrivals == 0) 0.0 else (categoryDelay[cls] ?: 0.0) / arrivals)
+            CategorySimulationMetrics(
+                cls, arrivals, categoryDepartures[cls] ?: 0,
+                if (arrivals == 0) 0.0 else (categoryDelay[cls] ?: 0.0) / arrivals
+            )
         }
-        val allDelay = movementMetrics.sumOf { it.totalDelayVehicleHours }
-        val allDelaySeconds = movementMetrics.sumOf { it.averageDelaySeconds * it.arrivals }
+        val totalDelay = movementMetrics.sumOf { it.totalDelayVehicleHours }
+        val totalDelaySeconds = movementMetrics.sumOf { it.averageDelaySeconds * it.arrivals }
         return TrafficSimulationResult(
             demand.durationSeconds, timing.cycleLengthSeconds, totalArrivals, totalDepartures,
-            states.values.sumOf { it.queue.size }, globalMaxQueue,
-            if (totalArrivals == 0) 0.0 else allDelaySeconds / totalArrivals,
-            allDelay, movementMetrics, categoryMetrics, snapshots, diagnostics.distinct()
+            physicalLanes.sumOf { it.vehicles.size + it.upstreamQueue.size }, globalMaxQueue,
+            if (totalArrivals == 0) 0.0 else totalDelaySeconds / totalArrivals,
+            totalDelay, movementMetrics, categoryMetrics, snapshots, diagnostics.distinct()
         )
     }
 
