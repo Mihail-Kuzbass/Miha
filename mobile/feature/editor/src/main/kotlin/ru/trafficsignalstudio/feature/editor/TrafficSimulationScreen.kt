@@ -260,8 +260,8 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     MetricLine("Поступило", "${simulation.totalArrivals} авт.")
                     MetricLine("Проехало стоп-линию", "${simulation.totalDepartures} авт.")
-                    MetricLine("Осталось в очередях и на подходах", "${simulation.totalQueueAtEnd} авт.")
-                    MetricLine("Максимальная очередь", "${simulation.maximumQueueVehicles} авт.")
+                    MetricLine("Осталось на подходах и во внешнем заторе", "${simulation.totalQueueAtEnd} авт.")
+                    MetricLine("Максимум ТС на подходах и в подпоре", "${simulation.maximumQueueVehicles} авт.")
                     MetricLine("Максимальная длина занятого подхода", "${"%.1f".format(simulation.maximumQueueLengthMeters)} м")
                     MetricLine("Ожидают за границей участка", "${simulation.spillbackVehiclesAtEnd} авт.")
                     MetricLine("Максимальный внешний затор", "${simulation.maximumSpillbackVehicles} авт.")
@@ -284,7 +284,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                     Text("Результаты по движениям", style = MaterialTheme.typography.titleMedium)
                     simulation.movementMetrics.forEachIndexed { index, metric ->
                         MetricLine("Движение ${index + 1}",
-                            "${metric.departures}/${metric.arrivals} · ${metric.queueVehiclesAtEnd} авт. · длина ${"%.1f".format(metric.queueLengthMetersAtEnd)} м · внешний затор ${metric.spillbackVehiclesAtEnd}")
+                            "${metric.departures}/${metric.arrivals} · на подходе ${metric.queueVehiclesAtEnd} авт. · занято ${"%.1f".format(metric.queueLengthMetersAtEnd)} м · внешний затор ${metric.spillbackVehiclesAtEnd}")
                     }
                 }
             }
