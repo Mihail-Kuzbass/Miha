@@ -11,6 +11,7 @@ object NetworkTrafficNetworkSolver {
     data class Result<T>(
         val nodeResults: Map<String, T>,
         val linkMetrics: List<NetworkLinkTrafficModel.LinkMetrics>,
+        val vehicleSchedules: List<NetworkLinkTrafficModel.VehicleSchedule>,
         val propagationIterations: Int,
         val converged: Boolean
     )
@@ -32,6 +33,7 @@ object NetworkTrafficNetworkSolver {
         var incoming: Map<String, List<ExternalVehicleArrival>> = emptyMap()
         var finalResults: Map<String, T> = emptyMap()
         var finalMetrics = emptyList<NetworkLinkTrafficModel.LinkMetrics>()
+        var finalSchedules = emptyList<NetworkLinkTrafficModel.VehicleSchedule>()
         var converged = enabledLinks.isEmpty()
         var iterations = 0
         val minTravelTime = enabledLinks.minOfOrNull {
@@ -62,6 +64,7 @@ object NetworkTrafficNetworkSolver {
             )
             finalResults = current
             finalMetrics = routed.metrics
+            finalSchedules = routed.vehicleSchedules
             val nextIncoming = routed.arrivalsByIntersection
             iterations++
             if (signature(incoming) == signature(nextIncoming)) {
@@ -70,6 +73,6 @@ object NetworkTrafficNetworkSolver {
             }
             incoming = nextIncoming
         }
-        return Result(finalResults, finalMetrics, iterations, converged)
+        return Result(finalResults, finalMetrics, finalSchedules, iterations, converged)
     }
 }
