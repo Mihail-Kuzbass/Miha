@@ -4,330 +4,312 @@ import ru.trafficsignalstudio.model.CoordinationDirection
 import ru.trafficsignalstudio.model.NetworkCoordinationSettings
 import ru.trafficsignalstudio.model.NetworkTrafficLink
 import ru.trafficsignalstudio.model.RoadNetwork
-import java.util.PriorityQueue
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 enum class CoordinationIssueCode {
-    NO_REFERENCE, MISSING_SIGNAL_PLAN, INVALID_SIGNAL_PLAN, CYCLE_MISMATCH,
-    SOURCE_MOVEMENT_NOT_SIGNALLED, TARGET_MOVEMENT_NOT_SIGNALLED, UNREACHABLE_INTERSECTION,
-    NO_COORDINATED_LINKS
+    EMPTY_NETWORK,
+    INVALID_SIGNAL_PLAN,
+    MISSING_SIGNAL_PLAN,
+    CYCLE_LENGTH_MISMATCH,
+    MISSING_UPSTREAM_GREEN,
+    MISSING_DOWNSTREAM_GREEN,
+    LINK_SPEED_LIMITED,
+    UNREACHABLE_INTERSECTION,
+    CONFLICTING_CORRIDOR_CONSTRAINTS
 }
 
 data class CoordinationDiagnostic(
     val code: CoordinationIssueCode,
     val message: String,
     val intersectionId: String? = null,
-    val linkId: String? = null
+    val linkId: String? = null,
+    val isError: Boolean = false
 )
 
-data class CoordinationLinkResult(
+data class LinkProgressionResult(
     val linkId: String,
     val fromIntersectionId: String,
     val toIntersectionId: String,
     val travelTimeSeconds: Double,
-    val sourceGreenStartSeconds: Int,
-    val sourceGreenEndSeconds: Int,
-    val targetGreenStartSeconds: Int,
-    val targetGreenEndSeconds: Int,
-    val progressionBandwidthSeconds: Double,
-    val flowSharePercent: Double
+    val upstreamGreenStartSeconds: Int,
+    val downstreamGreenStartSeconds: Int,
+    val requiredOffsetDifferenceSeconds: Int,
+    val actualOffsetDifferenceSeconds: Int,
+    val coordinationErrorSeconds: Int,
+    val weight: Double
 )
 
 data class NetworkCoordinationReport(
     val cycleLengthSeconds: Int,
+    val referenceIntersectionId: String?,
     val offsetsSeconds: Map<String, Int>,
-    val links: List<CoordinationLinkResult>,
-    val diagnostics: List<CoordinationDiagnostic>,
-    val objectiveBandwidthSeconds: Double,
-    val isValid: Boolean
-)
+    val linkProgressions: List<LinkProgressionResult>,
+    val diagnostics: List<CoordinationDiagnostic>
+) {
+    val isValid: Boolean get() = diagnostics.none { it.isError }
+    val maximumAbsoluteErrorSeconds: Int
+        get() = linkProgressions.maxOfOrNull { kotlin.math.abs(it.coordinationErrorSeconds) } ?: 0
+}
 
 /**
- * Engineering coordination based on actual signal-plan green windows and
- * measured/configured link travel times. Yellow and all-red are deliberately
- * excluded from progression bandwidth: they are clearance intervals, not green.
+ * Engineering progression coordination.
  *
- * The selected common cycle is not used to stretch or compress local plans.
- * Every coordinated node must have a valid plan whose real cycle equals it.
+ * The offset convention matches TrafficSimulationEngine: a phase whose local
+ * start is p becomes active at absolute model time (offset + p).
+ *
+ * For every directed link:
+ *   offset[to] - offset[from] =
+ *       upstreamGreenStart + linkTravelTime - downstreamGreenStart (mod cycle).
+ *
+ * Multiple paths and closed network loops are solved as a weighted circular
+ * least-squares problem. Link flow share and usable green-window duration
+ * determine the constraint weight.
  */
 object NetworkCoordinationCalculator {
-    private data class GreenWindow(val start: Int, val end: Int) {
-        val midpoint: Double get() = (start + end) / 2.0
-    }
-
-    private data class DirectedLink(
-        val source: String,
-        val target: String,
-        val sourceMovement: String,
-        val targetMovement: String,
-        val id: String,
-        val distanceMeters: Double,
-        val speedKmh: Double,
-        val flowSharePercent: Double
+    private data class DirectedConstraint(
+        val link: NetworkTrafficLink,
+        val from: String,
+        val to: String,
+        val upstreamGreenStart: Int,
+        val downstreamGreenStart: Int,
+        val travelTime: Double,
+        val weight: Double
     ) {
-        val travelTimeSeconds: Double get() = distanceMeters / (speedKmh / 3.6)
+        fun requiredDelta(cycle: Int): Double =
+            wrap(upstreamGreenStart + travelTime - downstreamGreenStart, cycle)
     }
 
-    fun calculateOffsets(network: RoadNetwork, settings: NetworkCoordinationSettings): Map<String, Int> =
-        calculateReport(network, settings).offsetsSeconds
-
-    fun calculateReport(
+    fun calculate(
         network: RoadNetwork,
         settings: NetworkCoordinationSettings
     ): NetworkCoordinationReport {
-        val nodes = network.intersections.map { it.id }.toSet()
-        val cycle = settings.cycleLengthSeconds
-        if (nodes.isEmpty()) return NetworkCoordinationReport(cycle, emptyMap(), emptyList(), emptyList(), 0.0, false)
-
+        val nodes = network.intersections.map { it.id }.distinct()
+        val cycle = settings.cycleLengthSeconds.coerceIn(30, 240)
+        if (nodes.isEmpty()) {
+            return NetworkCoordinationReport(cycle, null, emptyMap(), emptyList(), listOf(
+                CoordinationDiagnostic(CoordinationIssueCode.EMPTY_NETWORK, "В сети нет перекрёстков", isError = true)
+            ))
+        }
         val diagnostics = mutableListOf<CoordinationDiagnostic>()
-        val root = settings.referenceIntersectionId?.takeIf { it in nodes }
-        if (root == null) {
-            diagnostics += CoordinationDiagnostic(
-                CoordinationIssueCode.NO_REFERENCE,
-                "Не выбран существующий опорный светофорный объект."
-            )
-            return NetworkCoordinationReport(cycle, emptyMap(), emptyList(), diagnostics, 0.0, false)
-        }
+        val root = settings.referenceIntersectionId?.takeIf { it in nodes } ?: nodes.first()
+        val intersectionById = network.intersections.associateBy { it.id }
+        val phaseStarts = mutableMapOf<Pair<String, String>, Pair<Int, Int>>()
 
-        val directedLinks = buildList {
-            network.trafficLinks.filter { it.enabled && it.fromIntersectionId in nodes && it.toIntersectionId in nodes }
-                .forEach { link ->
-                    if (settings.direction != CoordinationDirection.REVERSE) add(link.toDirected())
-                    if (settings.direction != CoordinationDirection.FORWARD) add(link.toDirected(reverse = true))
-                }
-        }
-        if (directedLinks.isEmpty()) {
-            diagnostics += CoordinationDiagnostic(
-                CoordinationIssueCode.NO_COORDINATED_LINKS,
-                "Нет активных межузловых связей в выбранном направлении координации."
-            )
-        }
-
-        val windowsByNode = mutableMapOf<String, Map<String, GreenWindow>>()
-        network.intersections.forEach { node ->
-            val plan = node.signalPlan
+        network.intersections.forEach { intersection ->
+            val plan = intersection.signalPlan
             if (plan == null || !plan.enabled) {
-                if (directedLinks.any { it.source == node.id || it.target == node.id }) {
-                    diagnostics += CoordinationDiagnostic(
-                        CoordinationIssueCode.MISSING_SIGNAL_PLAN,
-                        "Для объекта «${node.name}» отсутствует включённый светофорный план.",
-                        intersectionId = node.id
-                    )
+                diagnostics += CoordinationDiagnostic(
+                    CoordinationIssueCode.MISSING_SIGNAL_PLAN,
+                    "Для перекрёстка «${intersection.name}» не задан включённый светофорный план; для движений без плана используется нулевое начало зелёного окна.",
+                    intersection.id
+                )
+                intersection.laneConnections.forEach { connection ->
+                    phaseStarts[intersection.id to connection.id] = 0 to 0
                 }
                 return@forEach
             }
-            val timing = SignalPlanTimingAnalyzer.analyze(node)
-            if (!timing.isValid || timing.cycleLengthSeconds <= 0) {
+            val timing = SignalPlanTimingAnalyzer.analyze(intersection)
+            if (!timing.isValid) {
                 diagnostics += CoordinationDiagnostic(
                     CoordinationIssueCode.INVALID_SIGNAL_PLAN,
-                    "План объекта «${node.name}» содержит ошибки и не может участвовать в координации.",
-                    intersectionId = node.id
+                    "Светофорный план «${intersection.name}» содержит ошибки и не может считаться нормативно проверенным.",
+                    intersection.id,
+                    isError = true
                 )
-                return@forEach
             }
             if (timing.cycleLengthSeconds != cycle) {
                 diagnostics += CoordinationDiagnostic(
-                    CoordinationIssueCode.CYCLE_MISMATCH,
-                    "Фактический цикл объекта «${node.name}» равен ${timing.cycleLengthSeconds} с, общий цикл координации — ${cycle} с. Автоматическое масштабирование фаз запрещено.",
-                    intersectionId = node.id
+                    CoordinationIssueCode.CYCLE_LENGTH_MISMATCH,
+                    "Цикл перекрёстка «${intersection.name}» равен ${timing.cycleLengthSeconds} с, а общий цикл координации — ${cycle} с. Автоматическое растягивание фаз не применяется.",
+                    intersection.id,
+                    isError = true
                 )
-                return@forEach
             }
-            val greenByMovement = mutableMapOf<String, GreenWindow>()
-            timing.phaseWindows.forEach { phaseWindow ->
-                val phase = plan.phases.firstOrNull { it.id == phaseWindow.phaseId } ?: return@forEach
-                phase.greenConnectionIds.forEach { movementId ->
-                    greenByMovement[movementId] = GreenWindow(phaseWindow.startSeconds, phaseWindow.greenEndSeconds)
+            timing.phaseWindows.forEach { window ->
+                val phase = plan.phases.firstOrNull { it.id == window.phaseId } ?: return@forEach
+                phase.greenConnectionIds.forEach { connectionId ->
+                    val greenStart = window.startSeconds
+                    val usableGreenEnd = window.flashingGreenEndSeconds
+                    phaseStarts[intersection.id to connectionId] = greenStart to (usableGreenEnd - greenStart).coerceAtLeast(0)
                 }
             }
-            windowsByNode[node.id] = greenByMovement
-        }
-
-        val usableLinks = directedLinks.filter { link ->
-            val sourceWindow = windowsByNode[link.source]?.get(link.sourceMovement)
-            val targetWindow = windowsByNode[link.target]?.get(link.targetMovement)
-            var usable = true
-            if (sourceWindow == null) {
+            // ГОСТ Р 52289-2019, 7.5.2: yellow interval is 3 s.
+            plan.phases.filter { it.yellowSeconds != 3 }.forEach { phase ->
                 diagnostics += CoordinationDiagnostic(
-                    CoordinationIssueCode.SOURCE_MOVEMENT_NOT_SIGNALLED,
-                    "Выходное движение связи «${link.id}» не имеет действующего зелёного интервала.",
-                    intersectionId = link.source, linkId = link.id
+                    CoordinationIssueCode.INVALID_SIGNAL_PLAN,
+                    "Фаза «${phase.name}»: жёлтый интервал должен составлять 3 с по п. 7.5.2 ГОСТ Р 52289-2019.",
+                    intersection.id,
+                    isError = true
                 )
-                usable = false
-            }
-            if (targetWindow == null) {
-                diagnostics += CoordinationDiagnostic(
-                    CoordinationIssueCode.TARGET_MOVEMENT_NOT_SIGNALLED,
-                    "Входное движение связи «${link.id}» не имеет действующего зелёного интервала на принимающем объекте.",
-                    intersectionId = link.target, linkId = link.id
-                )
-                usable = false
-            }
-            usable
-        }
-
-        val offsets = nodes.associateWith { 0 }.toMutableMap()
-        if (usableLinks.isNotEmpty()) {
-            // First obtain a physically meaningful travel-time progression seed.
-            val outgoing = usableLinks.groupBy { it.source }
-            val travelTimes = mutableMapOf(root to 0.0)
-            val queue = PriorityQueue<Pair<String, Double>>(compareBy { it.second })
-            queue.add(root to 0.0)
-            while (queue.isNotEmpty()) {
-                val (current, known) = queue.remove()
-                if (known > (travelTimes[current] ?: Double.POSITIVE_INFINITY) + 1e-9) continue
-                outgoing[current].orEmpty().forEach { link ->
-                    val sourceWindow = windowsByNode.getValue(link.source).getValue(link.sourceMovement)
-                    val targetWindow = windowsByNode.getValue(link.target).getValue(link.targetMovement)
-                    val phaseCorrection = sourceWindow.midpoint - targetWindow.midpoint
-                    val candidate = known + link.travelTimeSeconds
-                    if (candidate + 1e-9 < (travelTimes[link.target] ?: Double.POSITIVE_INFINITY)) {
-                        travelTimes[link.target] = candidate
-                        offsets[link.target] = (offsets.getValue(link.source) +
-                            link.travelTimeSeconds.roundToInt() + phaseCorrection.roundToInt()).mod(cycle)
-                        queue.add(link.target to candidate)
-                    }
-                }
-            }
-
-            // Deterministic coordinate descent maximizes total weighted green-band
-            // overlap on all links while keeping the reference offset fixed at zero.
-            val nodeOrder = network.intersections.map { it.id }.filter { it != root }
-            repeat(12) {
-                var changed = false
-                nodeOrder.forEach { nodeId ->
-                    if (windowsByNode[nodeId] == null) return@forEach
-                    val incident = usableLinks.filter { it.source == nodeId || it.target == nodeId }
-                    if (incident.isEmpty()) return@forEach
-                    val current = offsets.getValue(nodeId)
-                    var best = current
-                    var bestScore = localScore(nodeId, current, incident, offsets, windowsByNode, cycle)
-                    for (candidate in 0 until cycle) {
-                        val score = localScore(nodeId, candidate, incident, offsets, windowsByNode, cycle)
-                        if (score > bestScore + 1e-8 || (abs(score - bestScore) <= 1e-8 && candidate < best)) {
-                            bestScore = score
-                            best = candidate
-                        }
-                    }
-                    if (best != current) {
-                        offsets[nodeId] = best
-                        changed = true
-                    }
-                }
-                if (!changed) return@repeat
             }
         }
 
-        val reached = reachableFrom(root, usableLinks)
-        network.intersections.filter { it.id !in reached }.forEach { node ->
+        val directed = mutableListOf<DirectedConstraint>()
+        network.trafficLinks.filter { it.enabled && it.fromIntersectionId in nodes && it.toIntersectionId in nodes }
+            .forEach { link ->
+                if (settings.direction != CoordinationDirection.REVERSE) {
+                    addConstraint(link, link.fromIntersectionId, link.toIntersectionId,
+                        link.fromMovementConnectionId, link.toMovementConnectionId,
+                        phaseStarts, settings, directed, diagnostics)
+                }
+                if (settings.direction != CoordinationDirection.FORWARD) {
+                    addConstraint(link, link.toIntersectionId, link.fromIntersectionId,
+                        link.toMovementConnectionId, link.fromMovementConnectionId,
+                        phaseStarts, settings, directed, diagnostics)
+                }
+            }
+
+        val offsets = solveOffsets(nodes, root, directed, cycle)
+        val progressionResults = directed.map { edge ->
+            val required = edge.requiredDelta(cycle).roundToInt().mod(cycle)
+            val actual = wrap(offsets[edge.to].orZero() - offsets[edge.from].orZero(), cycle).roundToInt().mod(cycle)
+            val error = circularDifference(actual.toDouble(), required.toDouble(), cycle).roundToInt()
+            LinkProgressionResult(
+                linkId = edge.link.id,
+                fromIntersectionId = edge.from,
+                toIntersectionId = edge.to,
+                travelTimeSeconds = edge.travelTime,
+                upstreamGreenStartSeconds = edge.upstreamGreenStart,
+                downstreamGreenStartSeconds = edge.downstreamGreenStart,
+                requiredOffsetDifferenceSeconds = required,
+                actualOffsetDifferenceSeconds = actual,
+                coordinationErrorSeconds = error,
+                weight = edge.weight
+            )
+        }
+        progressionResults.filter { kotlin.math.abs(it.coordinationErrorSeconds) > 2 }.forEach { result ->
+            diagnostics += CoordinationDiagnostic(
+                CoordinationIssueCode.CONFLICTING_CORRIDOR_CONSTRAINTS,
+                "Связь ${result.fromIntersectionId} → ${result.toIntersectionId}: остаточная ошибка координации ${result.coordinationErrorSeconds} с. Проверьте циклическую структуру сети, циклы и интенсивности.",
+                linkId = result.linkId
+            )
+        }
+        nodes.filter { it != root && directed.none { edge -> edge.to == it || edge.from == it } }.forEach { id ->
             diagnostics += CoordinationDiagnostic(
                 CoordinationIssueCode.UNREACHABLE_INTERSECTION,
-                "Объект «${node.name}» не связан с опорным объектом в выбранном направлении; сдвиг не рассчитывался.",
-                intersectionId = node.id
-            )
-            offsets[node.id] = 0
-        }
-
-        val linkResults = usableLinks.map { link ->
-            val sourceWindow = windowsByNode.getValue(link.source).getValue(link.sourceMovement)
-            val targetWindow = windowsByNode.getValue(link.target).getValue(link.targetMovement)
-            val bandwidth = overlapSeconds(
-                sourceOffset = offsets.getValue(link.source),
-                sourceWindow = sourceWindow,
-                travelTime = link.travelTimeSeconds,
-                targetOffset = offsets.getValue(link.target),
-                targetWindow = targetWindow,
-                cycle = cycle
-            )
-            CoordinationLinkResult(
-                linkId = link.id,
-                fromIntersectionId = link.source,
-                toIntersectionId = link.target,
-                travelTimeSeconds = link.travelTimeSeconds,
-                sourceGreenStartSeconds = sourceWindow.start,
-                sourceGreenEndSeconds = sourceWindow.end,
-                targetGreenStartSeconds = targetWindow.start,
-                targetGreenEndSeconds = targetWindow.end,
-                progressionBandwidthSeconds = bandwidth,
-                flowSharePercent = link.flowSharePercent
+                "Перекрёсток «${intersectionById[id]?.name ?: id}» не связан с координируемым коридором.",
+                id
             )
         }
-        val objective = linkResults.sumOf { it.progressionBandwidthSeconds * it.flowSharePercent / 100.0 }
-        val hasBlockingErrors = diagnostics.any {
-            it.code != CoordinationIssueCode.UNREACHABLE_INTERSECTION &&
-                it.code != CoordinationIssueCode.NO_COORDINATED_LINKS
-        }
-        return NetworkCoordinationReport(
-            cycleLengthSeconds = cycle,
-            offsetsSeconds = offsets.mapValues { it.value.mod(cycle) },
-            links = linkResults,
-            diagnostics = diagnostics.distinct(),
-            objectiveBandwidthSeconds = objective,
-            isValid = !hasBlockingErrors && linkResults.isNotEmpty()
-        )
+        return NetworkCoordinationReport(cycle, root, offsets, progressionResults, diagnostics.distinct())
     }
 
-    private fun NetworkTrafficLink.toDirected(reverse: Boolean = false): DirectedLink =
-        if (!reverse) DirectedLink(
-            fromIntersectionId, toIntersectionId, fromMovementConnectionId, toMovementConnectionId,
-            id, distanceMeters, travelSpeedKmh, flowSharePercent
-        ) else DirectedLink(
-            toIntersectionId, fromIntersectionId, toMovementConnectionId, fromMovementConnectionId,
-            id, distanceMeters, travelSpeedKmh, flowSharePercent
-        )
+    /** Compatibility API retained for callers that only need cycle offsets. */
+    fun calculateOffsets(
+        network: RoadNetwork,
+        settings: NetworkCoordinationSettings
+    ): Map<String, Int> = calculate(network, settings).offsetsSeconds
 
-    private fun localScore(
-        nodeId: String,
-        candidateOffset: Int,
-        links: List<DirectedLink>,
-        offsets: Map<String, Int>,
-        windows: Map<String, Map<String, GreenWindow>>,
+    private fun addConstraint(
+        link: NetworkTrafficLink,
+        from: String,
+        to: String,
+        fromMovement: String,
+        toMovement: String,
+        phaseStarts: Map<Pair<String, String>, Pair<Int, Int>>,
+        settings: NetworkCoordinationSettings,
+        output: MutableList<DirectedConstraint>,
+        diagnostics: MutableList<CoordinationDiagnostic>
+    ) {
+        val upstream = phaseStarts[from to fromMovement]
+        val downstream = phaseStarts[to to toMovement]
+        if (upstream == null) {
+            diagnostics += CoordinationDiagnostic(
+                CoordinationIssueCode.MISSING_UPSTREAM_GREEN,
+                "Для выходного движения связи не найдено разрешающее зелёное окно.",
+                from, link.id, isError = true
+            )
+            return
+        }
+        if (downstream == null) {
+            diagnostics += CoordinationDiagnostic(
+                CoordinationIssueCode.MISSING_DOWNSTREAM_GREEN,
+                "Для входного движения связи не найдено разрешающее зелёное окно.",
+                to, link.id, isError = true
+            )
+            return
+        }
+        val targetSpeed = settings.progressionSpeedKmh
+        val speed = minOf(targetSpeed, link.travelSpeedKmh)
+        if (speed + 1e-6 < targetSpeed) {
+            diagnostics += CoordinationDiagnostic(
+                CoordinationIssueCode.LINK_SPEED_LIMITED,
+                "На связи ${link.id} скорость сообщения ограничена скоростью участка ${link.travelSpeedKmh} км/ч.",
+                linkId = link.id
+            )
+        }
+        val distance = if (link.centerline.size >= 2) {
+            link.centerline.zipWithNext().sumOf { (a, b) ->
+                hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters)
+            }
+        } else link.distanceMeters
+        val travelTime = distance / (speed / 3.6)
+        val usableGreen = minOf(upstream.second, downstream.second).coerceAtLeast(1)
+        val weight = link.flowSharePercent.coerceAtLeast(0.1) * usableGreen
+        output += DirectedConstraint(link, from, to, upstream.first, downstream.first, travelTime, weight)
+    }
+
+    private fun solveOffsets(
+        nodes: List<String>,
+        root: String,
+        edges: List<DirectedConstraint>,
         cycle: Int
-    ): Double = links.sumOf { link ->
-        val sourceOffset = if (link.source == nodeId) candidateOffset else offsets.getValue(link.source)
-        val targetOffset = if (link.target == nodeId) candidateOffset else offsets.getValue(link.target)
-        overlapSeconds(
-            sourceOffset,
-            windows.getValue(link.source).getValue(link.sourceMovement),
-            link.travelTimeSeconds,
-            targetOffset,
-            windows.getValue(link.target).getValue(link.targetMovement),
-            cycle
-        ) * link.flowSharePercent / 100.0
+    ): Map<String, Int> {
+        if (edges.isEmpty()) return nodes.associateWith { 0 }
+        val offsets = nodes.associateWith { 0.0 }.toMutableMap()
+        // Seed the solution with a shortest-travel-time tree from the reference node.
+        val visited = mutableSetOf(root)
+        repeat(nodes.size) {
+            val candidates = edges.filter { it.from in visited && it.to !in visited }
+            val next = candidates.minByOrNull { it.travelTime } ?: return@repeat
+            offsets[next.to] = wrap(offsets[next.from].orZero() + next.requiredDelta(cycle), cycle)
+            visited += next.to
+        }
+        // Relax all network constraints. Circular averaging avoids discontinuities at cycle zero.
+        repeat(250) {
+            var maximumChange = 0.0
+            nodes.filter { it != root }.forEach { node ->
+                var x = 0.0
+                var y = 0.0
+                edges.forEach { edge ->
+                    val target = when (node) {
+                        edge.to -> wrap(offsets[edge.from].orZero() + edge.requiredDelta(cycle), cycle)
+                        edge.from -> wrap(offsets[edge.to].orZero() - edge.requiredDelta(cycle), cycle)
+                        else -> null
+                    } ?: return@forEach
+                    val angle = target / cycle * 2.0 * PI
+                    x += cos(angle) * edge.weight
+                    y += sin(angle) * edge.weight
+                }
+                if (kotlin.math.hypot(x, y) > 1e-9) {
+                    val angle = atan2(y, x)
+                    val target = wrap(angle / (2.0 * PI) * cycle, cycle)
+                    val previous = offsets[node].orZero()
+                    val change = circularDifference(target, previous, cycle)
+                    offsets[node] = wrap(previous + change * 0.65, cycle)
+                    maximumChange = maxOf(maximumChange, kotlin.math.abs(change))
+                }
+            }
+            if (maximumChange < 0.01) return@repeat
+        }
+        offsets[root] = 0.0
+        return offsets.mapValues { (_, value) -> wrap(value, cycle).roundToInt().mod(cycle) }
     }
 
-    private fun overlapSeconds(
-        sourceOffset: Int,
-        sourceWindow: GreenWindow,
-        travelTime: Double,
-        targetOffset: Int,
-        targetWindow: GreenWindow,
-        cycle: Int
-    ): Double {
-        val sourceStart = sourceOffset + sourceWindow.start + travelTime
-        val sourceEnd = sourceOffset + sourceWindow.end + travelTime
-        val targetStart = targetOffset + targetWindow.start
-        val targetEnd = targetOffset + targetWindow.end
-        var overlap = 0.0
-        for (shift in -2..2) {
-            val shiftedStart = targetStart + shift * cycle
-            val shiftedEnd = targetEnd + shift * cycle
-            overlap += max(0.0, min(sourceEnd, shiftedEnd) - max(sourceStart, shiftedStart))
-        }
-        return overlap.coerceIn(0.0, min(sourceWindow.end - sourceWindow.start, targetWindow.end - targetWindow.start).toDouble())
+    private fun wrap(value: Double, cycle: Int): Double =
+        ((value % cycle) + cycle) % cycle
+
+    private fun circularDifference(target: Double, current: Double, cycle: Int): Double {
+        var difference = wrap(target - current, cycle)
+        if (difference > cycle / 2.0) difference -= cycle
+        return difference
     }
 
-    private fun reachableFrom(root: String, links: List<DirectedLink>): Set<String> {
-        val reached = mutableSetOf(root)
-        val queue = ArrayDeque<String>()
-        queue.add(root)
-        val outgoing = links.groupBy { it.source }
-        while (queue.isNotEmpty()) {
-            outgoing[queue.removeFirst()].orEmpty().forEach { if (reached.add(it.target)) queue.add(it.target) }
-        }
-        return reached
-    }
+    private fun Map<String, Double>.orZero(key: String): Double = this[key] ?: 0.0
+    private fun Double?.orZero(): Double = this ?: 0.0
 }
