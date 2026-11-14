@@ -388,7 +388,9 @@ fun NetworkTrafficSimulationScreen(
                                 demands: List<MovementTrafficDemand>,
                                 externalArrivals: List<ExternalVehicleArrival> = emptyList()
                             ): TrafficSimulationResult {
-                                val offset = if (coordinationUsable) {
+                                val nodeIsCoordinated = coordinationUsable &&
+                                    node.id in coordinationReport.coordinatedIntersectionIds
+                                val offset = if (nodeIsCoordinated) {
                                     coordinationReport.offsetsSeconds[node.id]?.toDouble() ?: 0.0
                                 } else 0.0
                                 return TrafficSimulationEngine.run(node, TrafficSimulationDemand(
@@ -396,7 +398,7 @@ fun NetworkTrafficSimulationScreen(
                                     externalArrivals = externalArrivals,
                                     durationSeconds = durationMinutes * 60,
                                     signalOffsetSeconds = offset,
-                                    signalCycleLengthSeconds = if (coordinationUsable) coordination.cycleLengthSeconds else null,
+                                    signalCycleLengthSeconds = if (nodeIsCoordinated) coordination.cycleLengthSeconds else null,
                                     crashMode = crashMode,
                                     manualCrashEvents = if (crashMode == CrashSimulationMode.EXPERIMENTAL) manualCrashEvents else emptyList()
                                 ))
