@@ -44,7 +44,9 @@ data class NetworkCoordinationReport(
     val links: List<CoordinationLinkResult>,
     val diagnostics: List<CoordinationDiagnostic>,
     val objectiveBandwidthSeconds: Double,
-    val isValid: Boolean
+    val isValid: Boolean,
+    /** Nodes reachable from the reference object and eligible for coordinated timing. */
+    val coordinatedIntersectionIds: Set<String> = emptySet()
 )
 
 /**
@@ -287,7 +289,8 @@ object NetworkCoordinationCalculator {
             links = linkResults,
             diagnostics = diagnostics.distinct(),
             objectiveBandwidthSeconds = objective,
-            isValid = !hasBlockingErrors && linkResults.isNotEmpty()
+            isValid = !hasBlockingErrors && linkResults.isNotEmpty(),
+            coordinatedIntersectionIds = reached
         )
     }
 
