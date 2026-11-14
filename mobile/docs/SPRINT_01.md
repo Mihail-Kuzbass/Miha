@@ -69,7 +69,7 @@
 
 Все пути ниже относительно корня репозитория.
 
-§§§text
+```text
 mobile/
 ├── settings.gradle.kts
 ├── build.gradle.kts
@@ -105,7 +105,7 @@ mobile/
     ├── DOMAIN_MODEL.md
     ├── MICROSIMULATION.md
     └── SPRINT_01.md
-§§§
+```
 
 ### Текущие модули
 
@@ -135,7 +135,7 @@ mobile/
 
 ### Направление зависимостей
 
-§§§text
+```text
 :app ───────────────► :feature:editor
   │                         │
   ├──► :data:local ─────────┤
@@ -145,7 +145,7 @@ mobile/
 :data:local ───────────────► :core:model
 :core:geometry ────────────► :core:model
 :core:model ───────────────► Kotlin/JVM only
-§§§
+```
 
 Запрещённые зависимости: core:model -> Android/Compose, core:geometry -> app, data:local -> feature:*. UI передаёт команды и получает результат; движок не должен импортировать Compose-классы.
 
@@ -325,22 +325,22 @@ IntersectionEditorScreen.kt уже реализует рабочее поле Ca
 
 В текущем репозитории есть gradle/wrapper/gradle-wrapper.properties, но отсутствуют gradlew, gradlew.bat и gradle-wrapper.jar. Поэтому до добавления официального Wrapper команды выполняются установленным Gradle 9.7.0:
 
-§§§bash
+```bash
 cd mobile
 gradle --version
 gradle :core:model:test
 gradle :core:geometry:test
 gradle :app:testDebugUnitTest
 gradle :app:assembleDebug
-§§§
+```
 
 Проверка установленного APK через Android SDK:
 
-§§§bash
+```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am force-stop ru.trafficsignalstudio.mobile
 adb shell monkey -p ru.trafficsignalstudio.mobile 1
-§§§
+```
 
 Для полной приёмки повторить запуск после включения авиарежима, создать проект, сохранить, принудительно остановить приложение и открыть проект повторно.
 
