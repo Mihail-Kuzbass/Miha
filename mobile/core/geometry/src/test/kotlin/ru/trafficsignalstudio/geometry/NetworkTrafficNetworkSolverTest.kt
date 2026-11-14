@@ -146,7 +146,7 @@ class NetworkTrafficNetworkSolverTest {
                 assertEquals(0, leader.laneIndex)
                 assertTrue(
                     "Following car must not overlap or pass the bus at t=$time",
-                    follower.positionMeters + follower.lengthMeters + 2.0 <=
+                    follower.positionMeters + 2.0 <=
                         leader.positionMeters - leader.lengthMeters + 1e-6
                 )
             }
