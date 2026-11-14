@@ -96,7 +96,15 @@ fun IntersectionEditorScreen(
     var showSimulation by remember(intersection?.id) { mutableStateOf(false) }
     var intersectionMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
     if (showSimulation && intersection != null) {
-        TrafficSimulationScreen(intersection = intersection, onBack = { showSimulation = false })
+        if (allowAddIntersection && project.network.intersections.size > 1) {
+            NetworkTrafficSimulationScreen(
+                project = project,
+                onProjectChange = onProjectChange,
+                onBack = { showSimulation = false }
+            )
+        } else {
+            TrafficSimulationScreen(intersection = intersection, onBack = { showSimulation = false })
+        }
         return
     }
     var selectedApproachIndex by remember(intersection?.id) { mutableIntStateOf(0) }

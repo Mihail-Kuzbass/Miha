@@ -126,8 +126,46 @@ data class Intersection(
     val signalPlan: SignalPlan? = null
 )
 
+enum class CoordinationDirection { FORWARD, REVERSE, BIDIRECTIONAL }
+
+/** A directed traffic assignment from one intersection movement to another. */
+data class NetworkTrafficLink(
+    val id: String = UUID.randomUUID().toString(),
+    val fromIntersectionId: String,
+    val fromMovementConnectionId: String,
+    val toIntersectionId: String,
+    val toMovementConnectionId: String,
+    val flowSharePercent: Double = 100.0,
+    val distanceMeters: Double = 500.0,
+    val enabled: Boolean = true
+) {
+    init {
+        require(fromIntersectionId.isNotBlank() && toIntersectionId.isNotBlank())
+        require(fromMovementConnectionId.isNotBlank() && toMovementConnectionId.isNotBlank())
+        require(fromIntersectionId != toIntersectionId)
+        require(flowSharePercent.isFinite() && flowSharePercent in 0.0..100.0)
+        require(distanceMeters.isFinite() && distanceMeters in 1.0..100000.0)
+    }
+}
+
+data class NetworkCoordinationSettings(
+    val enabled: Boolean = false,
+    val cycleLengthSeconds: Int = 90,
+    val progressionSpeedKmh: Double = 50.0,
+    val referenceIntersectionId: String? = null,
+    val direction: CoordinationDirection = CoordinationDirection.FORWARD,
+    val offsetsSeconds: Map<String, Int> = emptyMap()
+) {
+    init {
+        require(cycleLengthSeconds in 30..240)
+        require(progressionSpeedKmh.isFinite() && progressionSpeedKmh in 5.0..120.0)
+    }
+}
+
 data class RoadNetwork(
-    val intersections: List<Intersection> = emptyList()
+    val intersections: List<Intersection> = emptyList(),
+    val trafficLinks: List<NetworkTrafficLink> = emptyList(),
+    val coordination: NetworkCoordinationSettings = NetworkCoordinationSettings()
 )
 
 data class ProjectDocument(

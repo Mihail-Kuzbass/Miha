@@ -159,7 +159,30 @@ class ProjectJsonStore(context: Context) {
                     })
                 }
             }
-        ))
+        ).put("trafficLinks", JSONArray().apply {
+            project.network.trafficLinks.forEach { link ->
+                put(JSONObject().apply {
+                    put("id", link.id)
+                    put("fromIntersectionId", link.fromIntersectionId)
+                    put("fromMovementConnectionId", link.fromMovementConnectionId)
+                    put("toIntersectionId", link.toIntersectionId)
+                    put("toMovementConnectionId", link.toMovementConnectionId)
+                    put("flowSharePercent", link.flowSharePercent)
+                    put("distanceMeters", link.distanceMeters)
+                    put("enabled", link.enabled)
+                })
+            }
+        }).put("coordination", JSONObject().apply {
+            val settings = project.network.coordination
+            put("enabled", settings.enabled)
+            put("cycleLengthSeconds", settings.cycleLengthSeconds)
+            put("progressionSpeedKmh", settings.progressionSpeedKmh)
+            put("referenceIntersectionId", settings.referenceIntersectionId)
+            put("direction", settings.direction.name)
+            put("offsetsSeconds", JSONObject().apply {
+                settings.offsetsSeconds.forEach { (id, offset) -> put(id, offset) }
+            })
+        }))
     }
 
     private fun decode(json: JSONObject): ProjectDocument {
@@ -306,13 +329,44 @@ class ProjectJsonStore(context: Context) {
                 signalPlan = signalPlan
             )
         }
+        val linksJson = networkJson.optJSONArray("trafficLinks") ?: JSONArray()
+        val trafficLinks = (0 until linksJson.length()).mapNotNull { index ->
+            val link = linksJson.optJSONObject(index) ?: return@mapNotNull null
+            runCatching {
+                ru.trafficsignalstudio.model.NetworkTrafficLink(
+                    id = link.optString("id"),
+                    fromIntersectionId = link.getString("fromIntersectionId"),
+                    fromMovementConnectionId = link.getString("fromMovementConnectionId"),
+                    toIntersectionId = link.getString("toIntersectionId"),
+                    toMovementConnectionId = link.getString("toMovementConnectionId"),
+                    flowSharePercent = link.optDouble("flowSharePercent", 100.0),
+                    distanceMeters = link.optDouble("distanceMeters", 500.0),
+                    enabled = link.optBoolean("enabled", true)
+                )
+            }.getOrNull()
+        }
+        val coordinationJson = networkJson.optJSONObject("coordination") ?: JSONObject()
+        val offsetsJson = coordinationJson.optJSONObject("offsetsSeconds") ?: JSONObject()
+        val offsets = offsetsJson.keys().asSequence().mapNotNull { key ->
+            key.toIntOrNull()?.let { null } ?: runCatching { key to offsetsJson.getInt(key) }.getOrNull()
+        }.toMap()
+        val coordination = ru.trafficsignalstudio.model.NetworkCoordinationSettings(
+            enabled = coordinationJson.optBoolean("enabled", false),
+            cycleLengthSeconds = coordinationJson.optInt("cycleLengthSeconds", 90).coerceIn(30, 240),
+            progressionSpeedKmh = coordinationJson.optDouble("progressionSpeedKmh", 50.0).coerceIn(5.0, 120.0),
+            referenceIntersectionId = coordinationJson.optString("referenceIntersectionId").takeIf { it.isNotBlank() },
+            direction = runCatching {
+                ru.trafficsignalstudio.model.CoordinationDirection.valueOf(coordinationJson.optString("direction"))
+            }.getOrDefault(ru.trafficsignalstudio.model.CoordinationDirection.FORWARD),
+            offsetsSeconds = offsets
+        )
         return ProjectDocument(
             schemaVersion = ProjectDocument.CURRENT_SCHEMA_VERSION,
             id = json.getString("id"),
             name = json.optString("name", "Проект"),
             createdAtEpochMs = json.optLong("createdAtEpochMs"),
             updatedAtEpochMs = json.optLong("updatedAtEpochMs"),
-            network = RoadNetwork(intersections)
+            network = RoadNetwork(intersections, trafficLinks, coordination)
         )
     }
 }

@@ -43,7 +43,9 @@ data class TrafficSimulationDemand(
     /** Free-flow speed at the upstream boundary, km/h. */
     val approachSpeedKmh: Double = 30.0,
     /** Optional global lower bound; when absent, vehicle-class-specific gaps are used. */
-    val minimumGapMeters: Double? = null
+    val minimumGapMeters: Double? = null,
+    /** Signal cycle start offset for network coordination. */
+    val signalOffsetSeconds: Double = 0.0
 ) {
     init {
         require(durationSeconds in 60..7200)
@@ -52,6 +54,7 @@ data class TrafficSimulationDemand(
         require(approachStorageLengthMeters.isFinite() && approachStorageLengthMeters in 20.0..1000.0)
         require(approachSpeedKmh.isFinite() && approachSpeedKmh in 5.0..80.0)
         require(minimumGapMeters == null || (minimumGapMeters.isFinite() && minimumGapMeters in 0.5..10.0))
+        require(signalOffsetSeconds.isFinite() && signalOffsetSeconds in 0.0..7200.0)
     }
 }
 
@@ -329,7 +332,7 @@ object TrafficSimulationEngine {
 
         fun greenFor(connectionId: String, atSeconds: Double): Boolean {
             if (!timing.isValid || timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) return false
-            val cycleTime = atSeconds % timing.cycleLengthSeconds
+            val cycleTime = ((atSeconds - demand.signalOffsetSeconds) % timing.cycleLengthSeconds + timing.cycleLengthSeconds) % timing.cycleLengthSeconds
             return timing.phaseWindows.any { window ->
                 cycleTime >= window.startSeconds && cycleTime < window.flashingGreenEndSeconds &&
                     signalPlan.phases.firstOrNull { it.id == window.phaseId }
