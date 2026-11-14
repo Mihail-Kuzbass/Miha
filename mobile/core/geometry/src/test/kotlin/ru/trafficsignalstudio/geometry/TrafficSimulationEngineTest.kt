@@ -282,6 +282,42 @@ class TrafficSimulationEngineTest {
         })
     }
 
+    @Test fun disabledCrashModeSuppressesManualAndPhysicalIncidentRegistration() {
+        val intersection = signalizedIntersection()
+        val result = TrafficSimulationEngine.run(intersection, TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 7200.0)),
+            durationSeconds = 120,
+            approachStorageLengthMeters = 120.0,
+            crashMode = CrashSimulationMode.DISABLED,
+            manualCrashEvents = listOf(
+                ManualCrashEvent(10.0, CrashRiskBand.FOLLOWING_DISTANCE, intersection.id)
+            )
+        ))
+        assertTrue("Disabled mode must not register scheduled or physical crashes",
+            result.crashIncidents.isEmpty())
+        assertTrue("Disabling crash registration must not stop normal traffic simulation",
+            result.totalArrivals > 0)
+    }
+
+    @Test fun experimentalCrashModeSchedulesTheConfiguredIncident() {
+        val intersection = signalizedIntersection()
+        val result = TrafficSimulationEngine.run(intersection, TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 7200.0)),
+            durationSeconds = 120,
+            approachStorageLengthMeters = 120.0,
+            crashMode = CrashSimulationMode.EXPERIMENTAL,
+            manualCrashEvents = listOf(
+                ManualCrashEvent(20.0, CrashRiskBand.FOLLOWING_DISTANCE, intersection.id)
+            )
+        ))
+        assertTrue("The configured incident should be registered at or after its scheduled time",
+            result.crashIncidents.any {
+                it.cause == CrashIncidentCause.RISK_SCENARIO &&
+                    it.type == CrashRiskBand.FOLLOWING_DISTANCE &&
+                    it.timeSeconds >= 20.0
+            })
+    }
+
     @Test fun vehiclesExposeNegativeAccelerationWhileBrakingForRedSignal() {
         val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
             movements = listOf(MovementTrafficDemand("m1", 1800.0)),
