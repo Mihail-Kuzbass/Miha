@@ -46,7 +46,10 @@ object NetworkLinkTrafficModel {
         val cruiseSpeedMetersPerSecond: Double,
         val lengthMeters: Double,
         val widthMeters: Double,
-        val minimumGapMeters: Double
+        val minimumGapMeters: Double,
+        val centerline: List<ru.trafficsignalstudio.model.Point2D> = emptyList(),
+        val laneCount: Int = 1,
+        val laneWidthMeters: Double = 3.5
     )
 
     data class VehicleSnapshot(
@@ -57,7 +60,9 @@ object NetworkLinkTrafficModel {
         val positionMeters: Double,
         val speedMetersPerSecond: Double,
         val lengthMeters: Double,
-        val widthMeters: Double
+        val widthMeters: Double,
+        val worldPoint: ru.trafficsignalstudio.model.Point2D,
+        val headingRadians: Double
     )
 
     data class Result(
@@ -93,6 +98,15 @@ object NetworkLinkTrafficModel {
         }
         val position = rawPosition.coerceIn(0.0, schedule.distanceMeters)
         val speed = min(schedule.cruiseSpeedMetersPerSecond, acceleration * elapsed)
+        val path = schedule.centerline.ifEmpty {
+            listOf(
+                ru.trafficsignalstudio.model.Point2D(0.0, 0.0),
+                ru.trafficsignalstudio.model.Point2D(schedule.distanceMeters, 0.0)
+            )
+        }
+        val pose = NetworkRoadGeometry.poseAt(
+            path, position, schedule.laneIndex, schedule.laneCount, schedule.laneWidthMeters
+        )
         VehicleSnapshot(
             linkId = schedule.linkId,
             vehicleId = schedule.vehicleId,
@@ -101,7 +115,9 @@ object NetworkLinkTrafficModel {
             positionMeters = position,
             speedMetersPerSecond = speed,
             lengthMeters = schedule.lengthMeters,
-            widthMeters = schedule.widthMeters
+            widthMeters = schedule.widthMeters,
+            worldPoint = pose.point,
+            headingRadians = pose.headingRadians
         )
     }
 
@@ -219,7 +235,10 @@ object NetworkLinkTrafficModel {
                     cruiseSpeedMetersPerSecond = speed,
                     lengthMeters = vehicleModel.lengthMeters,
                     widthMeters = vehicleModel.widthMeters,
-                    minimumGapMeters = vehicleModel.minimumGapMeters
+                    minimumGapMeters = vehicleModel.minimumGapMeters,
+                    centerline = link.centerline,
+                    laneCount = link.laneCount,
+                    laneWidthMeters = link.laneWidthMeters
                 )
                 var schedule = scheduleAt(entryTime)
                 val leader = lastVehicleOnLane[laneIndex]
