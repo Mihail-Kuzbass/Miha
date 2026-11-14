@@ -80,10 +80,10 @@ object NetworkLinkTrafficModel {
         schedules: List<VehicleSchedule>,
         timeSeconds: Double
     ): List<VehicleSnapshot> = schedules.mapNotNull { schedule ->
-        if (timeSeconds < schedule.departureTimeSeconds || timeSeconds >= schedule.arrivalTimeSeconds) {
+        if (timeSeconds < schedule.entryTimeSeconds || timeSeconds >= schedule.arrivalTimeSeconds) {
             return@mapNotNull null
         }
-        val queued = timeSeconds < schedule.entryTimeSeconds
+        val queued = false
         val elapsed = (timeSeconds - schedule.entryTimeSeconds).coerceAtLeast(0.0)
         val acceleration = schedule.accelerationMetersPerSecondSquared
         val accelTime = schedule.cruiseSpeedMetersPerSecond / acceleration
