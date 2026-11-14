@@ -41,6 +41,64 @@ class TrajectoryConflictAnalyzerTest {
     }
 
     @Test
+    fun movementsFromOneSharedLaneDoNotConflictJustBecauseOneTurns() {
+        val incoming = Approach(
+            id = "north",
+            name = "Север",
+            headingDegrees = 0.0,
+            lanes = listOf(Lane(
+                id = "shared-in",
+                index = 0,
+                flowDirection = LaneFlowDirection.INTO_INTERSECTION,
+                allowedMovements = setOf(MovementKind.THROUGH, MovementKind.RIGHT)
+            ))
+        )
+        val southOut = Approach(
+            id = "south",
+            name = "Юг",
+            headingDegrees = 180.0,
+            lanes = listOf(Lane(id = "south-out", index = 0,
+                flowDirection = LaneFlowDirection.OUT_OF_INTERSECTION))
+        )
+        val westOut = Approach(
+            id = "west",
+            name = "Запад",
+            headingDegrees = 270.0,
+            lanes = listOf(Lane(id = "west-out", index = 0,
+                flowDirection = LaneFlowDirection.OUT_OF_INTERSECTION))
+        )
+        val intersection = Intersection(
+            name = "Общая полоса: прямо и направо",
+            type = IntersectionType.CUSTOM,
+            approaches = listOf(incoming, southOut, westOut),
+            laneConnections = listOf(
+                LaneConnection("north-through", "north", "shared-in", "south", "south-out"),
+                LaneConnection("north-right", "north", "shared-in", "west", "west-out")
+            ),
+            signalPlan = SignalPlan(phases = listOf(
+                SignalPhase(
+                    id = "shared-green",
+                    name = "Прямо и направо",
+                    greenConnectionIds = setOf("north-through", "north-right"),
+                    greenSeconds = 30,
+                    yellowSeconds = 3,
+                    allRedSeconds = 2
+                )
+            ))
+        )
+
+        assertTrue(
+            "Alternative routes from the same physical lane must not be counted as conflicting movements",
+            TrajectoryConflictAnalyzer.analyzeMovementConflicts(intersection).isEmpty()
+        )
+        val trajectories = TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection)
+        assertTrue(
+            "The shared approach segment must not create a false vehicle-envelope conflict",
+            VehicleEnvelopeConflictAnalyzer.analyze(trajectories).isEmpty()
+        )
+    }
+
+    @Test
     fun opposingThroughMovementsHaveGeometricCrossing() {
         val intersection = crossingMovementIntersection()
         val trajectories = TrajectoryConflictAnalyzer.buildMovementTrajectories(intersection)

@@ -153,6 +153,12 @@ object TrajectoryConflictAnalyzer {
         for (i in trajectories.indices) for (j in i + 1 until trajectories.size) {
             val first = trajectories[i]
             val second = trajectories[j]
+            // Connections that originate from the same physical entry lane are
+            // alternative routes for one lane stream (for example, straight or
+            // right). Their shared approach segment is not an intersection
+            // conflict and must not create a false crash-risk event.
+            if (first.fromApproachId == second.fromApproachId &&
+                first.fromLaneId == second.fromLaneId) continue
             collectHits(first.points, second.points).forEach { hit ->
                 val firstPhases = phaseAssignments[first.connectionId].orEmpty()
                 val secondPhases = phaseAssignments[second.connectionId].orEmpty()

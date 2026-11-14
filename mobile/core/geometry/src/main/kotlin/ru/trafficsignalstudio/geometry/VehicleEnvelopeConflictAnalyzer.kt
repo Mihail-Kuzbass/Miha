@@ -43,6 +43,11 @@ object VehicleEnvelopeConflictAnalyzer {
             val first = trajectories[i]
             val second = trajectories[j]
             if (first.connectionId == second.connectionId || first.points.size < 2 || second.points.size < 2) continue
+            // Same incoming approach + lane means both connections are route
+            // choices made by vehicles sharing one physical lane. Do not turn
+            // their common start geometry into a swept-envelope conflict.
+            if (first.fromApproachId == second.fromApproachId &&
+                first.fromLaneId == second.fromLaneId) continue
             val required = (first.vehicleWidthMeters + second.vehicleWidthMeters) / 2.0
             val firstSegments = segmentsByConnection[first.connectionId].orEmpty()
             val secondSegments = segmentsByConnection[second.connectionId].orEmpty()
