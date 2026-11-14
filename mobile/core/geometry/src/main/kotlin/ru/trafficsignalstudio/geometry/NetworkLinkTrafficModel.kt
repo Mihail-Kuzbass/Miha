@@ -262,12 +262,11 @@ object NetworkLinkTrafficModel {
                     maximumQueueLength = max(maximumQueueLength, queueLength)
                     if (delta > 0 && queueLength > link.queueStorageLengthMeters * link.laneCount) spillbackVehicles++
                 }
+            val waitingAtEnd = schedules.count { it.entryTimeSeconds > durationSeconds }
             metrics += LinkMetrics(
                 linkId = link.id,
-                vehiclesEntered = schedules.count { it.entryTimeSeconds <= durationSeconds },
-                vehiclesWaitingAtEnd = schedules.count {
-                    it.departureTimeSeconds <= durationSeconds && it.entryTimeSeconds > durationSeconds
-                },
+                vehiclesEntered = candidates.size - waitingAtEnd,
+                vehiclesWaitingAtEnd = waitingAtEnd,
                 vehiclesArrivedWithinHorizon = arrivedWithinHorizon,
                 maximumEntryQueue = maximumQueue,
                 averageEntryDelaySeconds = entryDelays.average().takeIf { it.isFinite() } ?: 0.0,
