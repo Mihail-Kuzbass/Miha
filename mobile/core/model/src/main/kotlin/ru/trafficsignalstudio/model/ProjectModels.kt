@@ -137,6 +137,8 @@ data class NetworkTrafficLink(
     val toMovementConnectionId: String,
     val flowSharePercent: Double = 100.0,
     val distanceMeters: Double = 500.0,
+    /** Free-flow travel speed on the link, used to schedule individual arrivals. */
+    val travelSpeedKmh: Double = 30.0,
     val enabled: Boolean = true
 ) {
     init {
@@ -145,6 +147,7 @@ data class NetworkTrafficLink(
         require(fromIntersectionId != toIntersectionId)
         require(flowSharePercent.isFinite() && flowSharePercent in 0.0..100.0)
         require(distanceMeters.isFinite() && distanceMeters in 1.0..100000.0)
+        require(travelSpeedKmh.isFinite() && travelSpeedKmh in 5.0..120.0)
     }
 }
 
