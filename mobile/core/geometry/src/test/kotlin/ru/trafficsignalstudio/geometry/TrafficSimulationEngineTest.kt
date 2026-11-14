@@ -40,6 +40,18 @@ class TrafficSimulationEngineTest {
         assertTrue(result.departureEvents.any { it.vehicleClass == VehicleClass.RIGID_TRUCK })
     }
 
+    @Test fun networkVehicleIdentityIsPreservedWhenItArrivesAtAnotherIntersection() {
+        val networkVehicleId = NETWORK_VEHICLE_ID_BASE + 12345L
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 0.0)),
+            externalArrivals = listOf(
+                ExternalVehicleArrival(30.0, "m1", VehicleClass.CITY_BUS, networkVehicleId)
+            ),
+            durationSeconds = 180
+        ))
+        assertTrue(result.departureEvents.any { it.vehicleId == networkVehicleId })
+    }
+
     @Test fun classSpecificFlowsAreIncludedInTotalArrivals() {
         val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
             movements = listOf(MovementTrafficDemand("m1", 360.0,
