@@ -45,7 +45,9 @@ data class TrafficSimulationDemand(
     /** Optional global lower bound; when absent, vehicle-class-specific gaps are used. */
     val minimumGapMeters: Double? = null,
     /** Signal cycle start offset for network coordination. */
-    val signalOffsetSeconds: Double = 0.0
+    val signalOffsetSeconds: Double = 0.0,
+    /** Optional common cycle; phase proportions are preserved when scaling. */
+    val signalCycleLengthSeconds: Int? = null
 ) {
     init {
         require(durationSeconds in 60..7200)
@@ -55,6 +57,7 @@ data class TrafficSimulationDemand(
         require(approachSpeedKmh.isFinite() && approachSpeedKmh in 5.0..80.0)
         require(minimumGapMeters == null || (minimumGapMeters.isFinite() && minimumGapMeters in 0.5..10.0))
         require(signalOffsetSeconds.isFinite() && signalOffsetSeconds in 0.0..7200.0)
+        require(signalCycleLengthSeconds == null || signalCycleLengthSeconds in 30..240)
     }
 }
 
@@ -332,7 +335,9 @@ object TrafficSimulationEngine {
 
         fun greenFor(connectionId: String, atSeconds: Double): Boolean {
             if (!timing.isValid || timing.cycleLengthSeconds <= 0 || signalPlan?.enabled != true) return false
-            val cycleTime = ((atSeconds - demand.signalOffsetSeconds) % timing.cycleLengthSeconds + timing.cycleLengthSeconds) % timing.cycleLengthSeconds
+            val activeCycleLength = demand.signalCycleLengthSeconds ?: timing.cycleLengthSeconds
+            val coordinatedTime = ((atSeconds - demand.signalOffsetSeconds) % activeCycleLength + activeCycleLength) % activeCycleLength
+            val cycleTime = coordinatedTime * timing.cycleLengthSeconds / activeCycleLength
             return timing.phaseWindows.any { window ->
                 cycleTime >= window.startSeconds && cycleTime < window.flashingGreenEndSeconds &&
                     signalPlan.phases.firstOrNull { it.id == window.phaseId }

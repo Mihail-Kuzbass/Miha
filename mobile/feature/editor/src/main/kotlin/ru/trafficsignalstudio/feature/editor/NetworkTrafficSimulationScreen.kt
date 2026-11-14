@@ -193,8 +193,14 @@ fun NetworkTrafficSimulationScreen(
                                 style = MaterialTheme.typography.bodySmall)
                         }
                         TextButton(onClick = {
+                            val updatedNetwork = network.copy(trafficLinks = network.trafficLinks.filterNot { it.id == link.id })
+                            val settings = updatedNetwork.coordination
+                            val coordinatedNetwork = if (settings.enabled) updatedNetwork.copy(
+                                coordination = settings.copy(offsetsSeconds =
+                                    NetworkCoordinationCalculator.calculateOffsets(updatedNetwork, settings))
+                            ) else updatedNetwork
                             onProjectChange(project.copy(updatedAtEpochMs = System.currentTimeMillis(),
-                                network = network.copy(trafficLinks = network.trafficLinks.filterNot { it.id == link.id })))
+                                network = coordinatedNetwork))
                             results = emptyMap()
                         }) { Text("Удалить") }
                     }
@@ -238,7 +244,8 @@ fun NetworkTrafficSimulationScreen(
                                 return TrafficSimulationEngine.run(node, TrafficSimulationDemand(
                                     movements = demands,
                                     durationSeconds = durationMinutes * 60,
-                                    signalOffsetSeconds = offset
+                                    signalOffsetSeconds = offset,
+                                    signalCycleLengthSeconds = if (coordination.enabled) coordination.cycleLengthSeconds else null
                                 ))
                             }
                             val baseline = intersections.associate { node ->
@@ -304,8 +311,14 @@ fun NetworkTrafficSimulationScreen(
             intersections = intersections,
             onDismiss = { showLinkDialog = false },
             onAdd = { link ->
+                val updatedNetwork = network.copy(trafficLinks = network.trafficLinks + link)
+                val settings = updatedNetwork.coordination
+                val coordinatedNetwork = if (settings.enabled) updatedNetwork.copy(
+                    coordination = settings.copy(offsetsSeconds =
+                        NetworkCoordinationCalculator.calculateOffsets(updatedNetwork, settings))
+                ) else updatedNetwork
                 onProjectChange(project.copy(updatedAtEpochMs = System.currentTimeMillis(),
-                    network = network.copy(trafficLinks = network.trafficLinks + link)))
+                    network = coordinatedNetwork))
                 results = emptyMap()
                 showLinkDialog = false
             }
