@@ -547,6 +547,7 @@ fun IntersectionEditorScreen(
                             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 listOf(
+                                    Triple("redYellow", "Красный + жёлтый, с", phase.redYellowSeconds),
                                     Triple("green", "Зелёный, с", phase.greenSeconds),
                                     Triple("flashing", "Мигающий зелёный, с", phase.flashingGreenSeconds),
                                     Triple("yellow", "Жёлтый, с", phase.yellowSeconds),
@@ -558,11 +559,13 @@ fun IntersectionEditorScreen(
                                         onValueChange = { raw ->
                                             phaseTimingInputs = phaseTimingInputs + (inputKey to raw)
                                             val parsed = raw.toIntOrNull()
-                                            val minimum = if (key == "green") 1 else 0
-                                            if (parsed != null && parsed >= minimum) {
+                                            val minimum = if (key == "green" || key == "redYellow") 1 else 0
+                                            val maximum = if (key == "redYellow") 2 else Int.MAX_VALUE
+                                            if (parsed != null && parsed in minimum..maximum) {
                                                 val plan = intersection.signalPlan ?: SignalPlan()
                                                 updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map { item ->
                                                     if (item.id != phase.id) item else when (key) {
+                                                        "redYellow" -> item.copy(redYellowSeconds = parsed)
                                                         "green" -> item.copy(greenSeconds = parsed)
                                                         "flashing" -> item.copy(flashingGreenSeconds = parsed)
                                                         "yellow" -> item.copy(yellowSeconds = parsed)
@@ -578,7 +581,7 @@ fun IntersectionEditorScreen(
                                     )
                                 }
                             }
-                            Text("Полный интервал фазы: ${phase.greenSeconds + phase.flashingGreenSeconds + phase.yellowSeconds + phase.allRedSeconds} с",
+                            Text("Полный интервал фазы: ${phase.redYellowSeconds + phase.greenSeconds + phase.flashingGreenSeconds + phase.yellowSeconds + phase.allRedSeconds} с",
                                 style = MaterialTheme.typography.labelSmall)
                         }
                     }
@@ -586,7 +589,7 @@ fun IntersectionEditorScreen(
                         Text("Расчётный цикл: ${report.cycleLengthSeconds} с",
                             style = MaterialTheme.typography.titleSmall)
                         report.phaseWindows.forEach { window ->
-                            Text("${window.phaseName}: зелёный ${window.startSeconds}–${window.greenEndSeconds} с; " +
+                            Text("${window.phaseName}: красный + жёлтый ${window.redYellowStartSeconds}–${window.redYellowEndSeconds} с; зелёный ${window.startSeconds}–${window.greenEndSeconds} с; " +
                                 "мигающий зелёный до ${window.flashingGreenEndSeconds} с; жёлтый до ${window.yellowEndSeconds} с; " +
                                 "общий красный до ${window.allRedEndSeconds} с",
                                 style = MaterialTheme.typography.bodySmall)
