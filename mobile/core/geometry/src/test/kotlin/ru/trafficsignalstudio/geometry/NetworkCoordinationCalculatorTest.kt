@@ -132,6 +132,20 @@ class NetworkCoordinationCalculatorTest {
         assertTrue(report.diagnostics.any { it.code == CoordinationIssueCode.UNREACHABLE_INTERSECTION && it.intersectionId == "C" })
     }
 
+    @Test fun longSectionProducesRecommendationWithoutBlockingCalculation() {
+        val network = RoadNetwork(
+            intersections = listOf(node("A", "out-A"), node("B", "in-B")),
+            trafficLinks = listOf(NetworkTrafficLink(
+                "AB", "A", "out-A", "B", "in-B", distanceMeters = 1500.0, travelSpeedKmh = 36.0
+            ))
+        )
+        val report = NetworkCoordinationCalculator.calculateReport(network, settings())
+        assertTrue(report.isValid)
+        assertTrue(report.diagnostics.any {
+            it.code == CoordinationIssueCode.LONG_COORDINATION_SECTION && it.isWarning
+        })
+    }
+
     @Test fun targetProgressionSpeedIsCappedByTheRoadSpeedLimit() {
         val network = RoadNetwork(
             intersections = listOf(node("A", "out-A"), node("B", "in-B")),
