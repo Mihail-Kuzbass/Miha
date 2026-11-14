@@ -15,13 +15,14 @@ class SignalPlanTimingAnalyzerTest {
             SignalPhase(id = "p1", name = "Первая", greenConnectionIds = setOf("move"), greenSeconds = 20, flashingGreenSeconds = 4, yellowSeconds = 3, allRedSeconds = 2),
             SignalPhase(id = "p2", name = "Вторая", greenConnectionIds = setOf("move-2"), greenSeconds = 30, flashingGreenSeconds = 2, yellowSeconds = 3, allRedSeconds = 1)
         ))))
-        assertEquals(65, report.cycleLengthSeconds)
-        assertEquals(0, report.phaseWindows[0].startSeconds)
-        assertEquals(20, report.phaseWindows[0].greenEndSeconds)
-        assertEquals(24, report.phaseWindows[0].flashingGreenEndSeconds)
-        assertEquals(27, report.phaseWindows[0].yellowEndSeconds)
-        assertEquals(29, report.phaseWindows[0].allRedEndSeconds)
-        assertEquals(29, report.phaseWindows[1].startSeconds)
+        assertEquals(69, report.cycleLengthSeconds)
+        assertEquals(2, report.phaseWindows[0].redYellowStartSeconds)
+        assertEquals(2, report.phaseWindows[0].startSeconds)
+        assertEquals(22, report.phaseWindows[0].greenEndSeconds)
+        assertEquals(26, report.phaseWindows[0].flashingGreenEndSeconds)
+        assertEquals(29, report.phaseWindows[0].yellowEndSeconds)
+        assertEquals(31, report.phaseWindows[0].allRedEndSeconds)
+        assertEquals(33, report.phaseWindows[1].startSeconds)
         assertTrue(report.diagnostics.any { it.code == SignalPlanIssueCode.UNKNOWN_CONNECTION })
     }
 
