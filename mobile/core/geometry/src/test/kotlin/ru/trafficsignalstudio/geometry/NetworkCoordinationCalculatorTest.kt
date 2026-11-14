@@ -132,6 +132,33 @@ class NetworkCoordinationCalculatorTest {
         assertTrue(report.diagnostics.any { it.code == CoordinationIssueCode.UNREACHABLE_INTERSECTION && it.intersectionId == "C" })
     }
 
+    @Test fun targetProgressionSpeedIsCappedByTheRoadSpeedLimit() {
+        val network = RoadNetwork(
+            intersections = listOf(node("A", "out-A"), node("B", "in-B")),
+            trafficLinks = listOf(NetworkTrafficLink(
+                "AB", "A", "out-A", "B", "in-B", distanceMeters = 100.0, travelSpeedKmh = 18.0
+            ))
+        )
+        val report = NetworkCoordinationCalculator.calculateReport(network, settings())
+        assertTrue(report.isValid)
+        assertEquals(20.0, report.links.single().travelTimeSeconds, 1e-6)
+    }
+
+    @Test fun rejectsNonStandardYellowIntervalInCoordinatedPlan() {
+        val nonStandard = node("A", "out-A").copy(signalPlan = SignalPlan(phases = listOf(
+            SignalPhase(id = "a-p1", name = "P1", greenConnectionIds = setOf("out-A"),
+                greenSeconds = 20, flashingGreenSeconds = 0, yellowSeconds = 2, allRedSeconds = 3),
+            SignalPhase(id = "a-p2", name = "P2", greenConnectionIds = setOf("other-A"),
+                greenSeconds = 20, flashingGreenSeconds = 0, yellowSeconds = 3, allRedSeconds = 2)
+        )))
+        val network = RoadNetwork(
+            intersections = listOf(nonStandard, node("B", "in-B")),
+            trafficLinks = listOf(NetworkTrafficLink("AB", "A", "out-A", "B", "in-B", distanceMeters = 100.0))
+        )
+        val report = NetworkCoordinationCalculator.calculateReport(network, settings())
+        assertFalse(report.isValid)
+        assertTrue(report.diagnostics.any { it.code == CoordinationIssueCode.INVALID_SIGNAL_PLAN && it.intersectionId == "A" })
+    }
     @Test fun maximizesBandwidthAcrossMultipleLinksAndAccountsForFlowShare() {
         val network = RoadNetwork(
             intersections = listOf(
