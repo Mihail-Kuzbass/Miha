@@ -68,6 +68,13 @@ import kotlin.math.min
 
 private data class NetworkChoice(val id: String, val title: String)
 
+private data class NetworkSimulationOutput(
+    val nodeResults: Map<String, TrafficSimulationResult>,
+    val linkMetrics: List<NetworkLinkTrafficModel.LinkMetrics>,
+    val propagationIterations: Int,
+    val converged: Boolean
+)
+
 @Composable
 fun NetworkTrafficSimulationScreen(
     project: ProjectDocument,
@@ -388,66 +395,32 @@ fun NetworkTrafficSimulationScreen(
                                     manualCrashEvents = if (crashMode == CrashSimulationMode.EXPERIMENTAL) manualCrashEvents else emptyList()
                                 ))
                             }
-                            val enabledLinks = network.trafficLinks.filter { it.enabled }
-                            val horizon = durationMinutes * 60
-                            var incomingEvents: Map<String, List<ExternalVehicleArrival>> = emptyMap()
-                            var finalComputed = linkedMapOf<String, TrafficSimulationResult>()
-                            var finalLinkMetrics = emptyList<NetworkLinkTrafficModel.LinkMetrics>()
-                            var converged = enabledLinks.isEmpty()
-                            var iterations = 0
-                            // Repeatedly advance the network one intersection hop at a time.
-                            // Positive road travel times make circulation finite within the
-                            // configured simulation horizon.
-                            val minimumLinkTravelSeconds = enabledLinks.minOfOrNull {
-                                it.distanceMeters / (it.travelSpeedKmh / 3.6)
-                            } ?: horizon.toDouble()
-                            val iterationLimit = minOf(
-                                2048,
-                                maxOf(32, kotlin.math.ceil(horizon / minimumLinkTravelSeconds).toInt() + 2)
+                            val networkRun = NetworkTrafficNetworkSolver.run(
+                                intersectionIds = intersections.map { it.id },
+                                links = network.trafficLinks,
+                                durationSeconds = durationMinutes * 60,
+                                simulateIntersection = { nodeId, incoming ->
+                                    val node = intersections.first { it.id == nodeId }
+                                    runNode(node, base[nodeId].orEmpty(), incoming)
+                                },
+                                departuresOf = { it.departureEvents }
                             )
-                            fun eventSignature(events: Map<String, List<ExternalVehicleArrival>>): List<String> =
-                                events.flatMap { (nodeId, values) ->
-                                    values.map { event ->
-                                        "$nodeId|${event.connectionId}|${(event.timeSeconds * 1000.0).toLong()}|" +
-                                            "${event.vehicleClass}|${event.sourceVehicleId}"
-                                    }
-                                }.sorted()
-                            while (iterations < iterationLimit) {
-                                val current = linkedMapOf<String, TrafficSimulationResult>()
-                                intersections.forEach { node ->
-                                    current[node.id] = runNode(
-                                        node,
-                                        base[node.id].orEmpty(),
-                                        incomingEvents[node.id].orEmpty()
-                                    )
-                                }
-                                val routed = NetworkLinkTrafficModel.route(
-                                    current.mapValues { it.value.departureEvents },
-                                    enabledLinks,
-                                    horizon
-                                )
-                                finalComputed = current
-                                finalLinkMetrics = routed.metrics
-                                val nextEvents = routed.arrivalsByIntersection
-                                iterations++
-                                if (eventSignature(incomingEvents) == eventSignature(nextEvents)) {
-                                    converged = true
-                                    break
-                                }
-                                incomingEvents = nextEvents
-                            }
-                            if (!converged) {
-                                finalComputed = finalComputed.mapValues { (_, result) ->
+                            val nodeResults = if (networkRun.converged) networkRun.nodeResults
+                                else networkRun.nodeResults.mapValues { (_, result) ->
                                     result.copy(diagnostics = result.diagnostics +
-                                        "Сетевая передача достигла предела $iterationLimit итераций до полного установления потоков в замкнутом контуре.")
-                                }.toMutableMap()
-                            }
-                            linkMetrics = finalLinkMetrics
-                            networkPropagationIterations = iterations
-                            networkPropagationConverged = converged
-                            finalComputed
+                                        "Сетевая передача достигла предела ${networkRun.propagationIterations} итераций до полного установления потоков в замкнутом контуре.")
+                                }
+                            NetworkSimulationOutput(
+                                nodeResults = nodeResults,
+                                linkMetrics = networkRun.linkMetrics,
+                                propagationIterations = networkRun.propagationIterations,
+                                converged = networkRun.converged
+                            )
                         }
-                        results = computed
+                        results = computed.nodeResults
+                        linkMetrics = computed.linkMetrics
+                        networkPropagationIterations = computed.propagationIterations
+                        networkPropagationConverged = computed.converged
                         selectedSnapshotIndex = 0
                     } catch (cancelled: CancellationException) {
                         throw cancelled
