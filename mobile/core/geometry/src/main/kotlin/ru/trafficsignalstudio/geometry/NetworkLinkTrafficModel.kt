@@ -180,6 +180,7 @@ object NetworkLinkTrafficModel {
             val candidates = candidatesByLink[link.id].orEmpty().sortedWith(
                 compareBy<Candidate> { it.departure.timeSeconds }.thenBy { it.departure.vehicleId }
             )
+            val linkSchedules = mutableListOf<VehicleSchedule>()
             val nextEntryAt = DoubleArray(link.laneCount)
             val lastVehicleOnLane = arrayOfNulls<VehicleSchedule>(link.laneCount)
             val entryDelays = mutableListOf<Double>()
@@ -239,6 +240,7 @@ object NetworkLinkTrafficModel {
                     queueEvents += Triple(entryTime, -1, -queueLength)
                 }
                 schedules += schedule
+                linkSchedules += schedule
                 if (arrivalTime <= durationSeconds + 1e-9) {
                     arrivals.getOrPut(link.toIntersectionId) { mutableListOf() } += ExternalVehicleArrival(
                         timeSeconds = arrivalTime,
@@ -262,7 +264,7 @@ object NetworkLinkTrafficModel {
                     maximumQueueLength = max(maximumQueueLength, queueLength)
                     if (delta > 0 && queueLength > link.queueStorageLengthMeters * link.laneCount) spillbackVehicles++
                 }
-            val waitingAtEnd = schedules.count { it.entryTimeSeconds > durationSeconds }
+            val waitingAtEnd = linkSchedules.count { it.entryTimeSeconds > durationSeconds }
             metrics += LinkMetrics(
                 linkId = link.id,
                 vehiclesEntered = candidates.size - waitingAtEnd,
