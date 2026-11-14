@@ -117,6 +117,40 @@ class NetworkTrafficNetworkSolverTest {
         assertEquals(1.0, moving.positionMeters, 0.001)
     }
 
+    @Test fun fasterFollowingVehicleCannotOvertakeSlowerVehicleOnSingleLaneLink() {
+        val link = NetworkTrafficLink(
+            id = "mixed-traffic",
+            fromIntersectionId = "A",
+            fromMovementConnectionId = "out",
+            toIntersectionId = "B",
+            toMovementConnectionId = "in",
+            distanceMeters = 100.0,
+            travelSpeedKmh = 36.0,
+            laneCount = 1
+        )
+        val result = NetworkLinkTrafficModel.route(
+            mapOf("A" to listOf(
+                VehicleDepartureEvent(0.0, "out", VehicleClass.CITY_BUS, 1L),
+                VehicleDepartureEvent(0.0, "out", VehicleClass.PASSENGER_CAR, 2L)
+            )),
+            listOf(link),
+            60
+        )
+        for (time in 0..60) {
+            val vehicles = result.vehiclesAt(time.toDouble()).sortedBy { it.positionMeters }
+            if (vehicles.size == 2) {
+                val follower = vehicles[0]
+                val leader = vehicles[1]
+                assertEquals(0, follower.laneIndex)
+                assertEquals(0, leader.laneIndex)
+                assertTrue(
+                    "Following car must not overlap or pass the bus at t=$time",
+                    follower.positionMeters + follower.lengthMeters + 2.0 <= leader.positionMeters + 1e-6
+                )
+            }
+        }
+    }
+
     @Test fun queueLengthBeyondRoadStorageIsReportedAsSpillback() {
         val link = NetworkTrafficLink(
             id = "short-link",
