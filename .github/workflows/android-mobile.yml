@@ -12,6 +12,12 @@ on:
       - "mobile/**"
       - ".github/workflows/android-mobile.yml"
   workflow_dispatch:
+    inputs:
+      build_apk:
+        description: "Собрать APK (по умолчанию выключено)"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   android:
@@ -53,13 +59,15 @@ jobs:
           gradle :core:model:test
           gradle :core:geometry:test
 
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug
-
       - name: Run Android unit tests
         run: gradle :app:testDebugUnitTest
 
+      - name: Assemble debug APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_apk == true }}
+        run: gradle :app:assembleDebug
+
       - name: Upload APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_apk == true }}
         uses: actions/upload-artifact@v4
         with:
           name: TrafficSignalStudio-Mobile-debug
