@@ -51,6 +51,7 @@ import ru.trafficsignalstudio.geometry.ManualCrashEvent
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
 import ru.trafficsignalstudio.geometry.NetworkCoordinationCalculator
 import ru.trafficsignalstudio.geometry.NetworkLinkTrafficModel
+import ru.trafficsignalstudio.geometry.NetworkTrafficNetworkSolver
 import ru.trafficsignalstudio.geometry.SignalPlanTimingAnalyzer
 import ru.trafficsignalstudio.geometry.TrafficSimulationDemand
 import ru.trafficsignalstudio.geometry.TrafficSimulationEngine
