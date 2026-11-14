@@ -796,7 +796,8 @@ private fun NetworkCoordinationDialog(
                     )
                 }
                 previewReport.diagnostics.forEach { diagnostic ->
-                    Text("• ${diagnostic.message}", color = MaterialTheme.colorScheme.error,
+                    Text("• ${diagnostic.message}",
+                        color = if (diagnostic.isWarning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.labelSmall)
                 }
                 CoordinationOffsetDiagram(network, previewSettings)
