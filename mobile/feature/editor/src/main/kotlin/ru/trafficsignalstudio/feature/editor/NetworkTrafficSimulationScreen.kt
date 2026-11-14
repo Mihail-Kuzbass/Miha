@@ -431,12 +431,12 @@ fun NetworkTrafficSimulationScreen(
                                     }
                                     result.departureEvents.asSequence()
                                         .filter { it.connectionId == movementId }
-                                        .forEach { departure ->
+                                        .forEach eventLoop@{ departure ->
                                             // A stable vehicle-specific bucket partitions a
                                             // source flow between links without duplicating cars.
                                             val bucket = Math.floorMod(departure.vehicleId * 7919L, 10000L) / 100.0
                                             val selected = cumulative.firstOrNull { bucket < it.second }?.first
-                                                ?: return@forEach
+                                                ?: return@eventLoop
                                             val travelSeconds = selected.distanceMeters /
                                                 (selected.travelSpeedKmh / 3.6)
                                             incomingEvents.getOrPut(selected.toIntersectionId) { mutableListOf() }
