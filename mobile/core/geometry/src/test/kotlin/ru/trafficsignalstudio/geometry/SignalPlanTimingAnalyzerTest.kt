@@ -36,6 +36,16 @@ class SignalPlanTimingAnalyzerTest {
         assertTrue(report.diagnostics.any { it.code == SignalPlanIssueCode.INVALID_RED_YELLOW_DURATION })
     }
 
+    @Test fun rejectsYellowDurationOtherThanThreeSeconds() {
+        val report = SignalPlanTimingAnalyzer.analyze(intersection(SignalPlan(phases = listOf(
+            SignalPhase(id = "p1", name = "Жёлтый", greenConnectionIds = setOf("move"),
+                redYellowSeconds = 2, greenSeconds = 20, flashingGreenSeconds = 0,
+                yellowSeconds = 4, allRedSeconds = 2)
+        ))))
+        assertFalse(report.isValid)
+        assertTrue(report.diagnostics.any { it.code == SignalPlanIssueCode.INVALID_YELLOW_DURATION })
+    }
+
     @Test fun reportsEmptyPhasesAndUnassignedMovements() {
         val report = SignalPlanTimingAnalyzer.analyze(intersection(SignalPlan(phases = listOf(
             SignalPhase(id = "p1", name = "Пустая", greenConnectionIds = emptySet())
