@@ -44,7 +44,8 @@ object NetworkLinkTrafficModel {
         val accelerationMetersPerSecondSquared: Double,
         val cruiseSpeedMetersPerSecond: Double,
         val lengthMeters: Double,
-        val widthMeters: Double
+        val widthMeters: Double,
+        val minimumGapMeters: Double
     )
 
     data class VehicleSnapshot(
@@ -107,6 +108,31 @@ object NetworkLinkTrafficModel {
         )
     }
 
+    private fun positionAt(schedule: VehicleSchedule, timeSeconds: Double): Double {
+        if (timeSeconds <= schedule.entryTimeSeconds) return 0.0
+        val elapsed = (timeSeconds - schedule.entryTimeSeconds).coerceAtLeast(0.0)
+        val acceleration = schedule.accelerationMetersPerSecondSquared
+        val accelTime = schedule.cruiseSpeedMetersPerSecond / acceleration
+        val accelDistance = 0.5 * acceleration * accelTime * accelTime
+        val position = if (elapsed < accelTime) 0.5 * acceleration * elapsed * elapsed
+            else accelDistance + schedule.cruiseSpeedMetersPerSecond * (elapsed - accelTime)
+        return position.coerceIn(0.0, schedule.distanceMeters)
+    }
+
+    private fun isSafeFollowing(leader: VehicleSchedule, follower: VehicleSchedule): Boolean {
+        if (leader.arrivalTimeSeconds <= follower.entryTimeSeconds) return true
+        var time = follower.entryTimeSeconds
+        val end = min(leader.arrivalTimeSeconds, follower.arrivalTimeSeconds)
+        while (time < end) {
+            val leaderPosition = positionAt(leader, time)
+            val followerPosition = positionAt(follower, time)
+            if (followerPosition + follower.lengthMeters + follower.minimumGapMeters >
+                leaderPosition - 1e-6) return false
+            time += 0.25
+        }
+        return true
+    }
+
     fun route(
         departuresByIntersection: Map<String, List<VehicleDepartureEvent>>,
         links: List<NetworkTrafficLink>,
@@ -150,6 +176,7 @@ object NetworkLinkTrafficModel {
                 compareBy<Candidate> { it.departure.timeSeconds }.thenBy { it.departure.vehicleId }
             )
             val nextEntryAt = DoubleArray(link.laneCount)
+            val lastVehicleOnLane = arrayOfNulls<VehicleSchedule>(link.laneCount)
             val entryDelays = mutableListOf<Double>()
             val queueEvents = mutableListOf<Triple<Double, Int, Double>>()
             var arrivedWithinHorizon = 0
@@ -164,9 +191,7 @@ object NetworkLinkTrafficModel {
                     (vehicleModel.lengthMeters + vehicleModel.minimumGapMeters) / speed
                 )
                 val laneIndex = nextEntryAt.indices.minByOrNull { nextEntryAt[it] } ?: 0
-                val entryTime = max(candidate.departure.timeSeconds, nextEntryAt[laneIndex])
-                val entryDelay = entryTime - candidate.departure.timeSeconds
-                nextEntryAt[laneIndex] = entryTime + safeHeadway
+                var entryTime = max(candidate.departure.timeSeconds, nextEntryAt[laneIndex])
                 val acceleration = vehicleModel.accelerationMetersPerSecondSquared.coerceAtLeast(0.1)
                 val accelTime = speed / acceleration
                 val accelDistance = 0.5 * acceleration * accelTime * accelTime
@@ -175,27 +200,40 @@ object NetworkLinkTrafficModel {
                 } else {
                     accelTime + (link.distanceMeters - accelDistance) / speed
                 }
-                val arrivalTime = entryTime + travelTime
+                fun scheduleAt(time: Double) = VehicleSchedule(
+                    linkId = link.id,
+                    vehicleId = candidate.departure.vehicleId,
+                    vehicleClass = candidate.departure.vehicleClass,
+                    laneIndex = laneIndex,
+                    departureTimeSeconds = candidate.departure.timeSeconds,
+                    entryTimeSeconds = time,
+                    arrivalTimeSeconds = time + travelTime,
+                    distanceMeters = link.distanceMeters,
+                    accelerationMetersPerSecondSquared = acceleration,
+                    cruiseSpeedMetersPerSecond = speed,
+                    lengthMeters = vehicleModel.lengthMeters,
+                    widthMeters = vehicleModel.widthMeters,
+                    minimumGapMeters = vehicleModel.minimumGapMeters
+                )
+                var schedule = scheduleAt(entryTime)
+                val leader = lastVehicleOnLane[laneIndex]
+                var safetyAdjustments = 0
+                while (leader != null && !isSafeFollowing(leader, schedule) && safetyAdjustments < 10000) {
+                    entryTime += 0.25
+                    schedule = scheduleAt(entryTime)
+                    safetyAdjustments++
+                }
+                val entryDelay = entryTime - candidate.departure.timeSeconds
+                nextEntryAt[laneIndex] = entryTime + safeHeadway
+                lastVehicleOnLane[laneIndex] = schedule
+                val arrivalTime = schedule.arrivalTimeSeconds
                 entryDelays += entryDelay
                 if (entryDelay > 1e-9) {
                     val queueLength = vehicleModel.lengthMeters + vehicleModel.minimumGapMeters
                     queueEvents += Triple(candidate.departure.timeSeconds, 1, queueLength)
                     queueEvents += Triple(entryTime, -1, -queueLength)
                 }
-                schedules += VehicleSchedule(
-                    linkId = link.id,
-                    vehicleId = candidate.departure.vehicleId,
-                    vehicleClass = candidate.departure.vehicleClass,
-                    laneIndex = laneIndex,
-                    departureTimeSeconds = candidate.departure.timeSeconds,
-                    entryTimeSeconds = entryTime,
-                    arrivalTimeSeconds = arrivalTime,
-                    distanceMeters = link.distanceMeters,
-                    accelerationMetersPerSecondSquared = acceleration,
-                    cruiseSpeedMetersPerSecond = speed,
-                    lengthMeters = vehicleModel.lengthMeters,
-                    widthMeters = vehicleModel.widthMeters
-                )
+                schedules += schedule
                 if (arrivalTime <= durationSeconds + 1e-9) {
                     arrivals.getOrPut(link.toIntersectionId) { mutableListOf() } += ExternalVehicleArrival(
                         timeSeconds = arrivalTime,
