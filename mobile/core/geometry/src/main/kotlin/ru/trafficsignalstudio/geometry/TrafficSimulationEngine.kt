@@ -48,7 +48,7 @@ data class ExternalVehicleArrival(
     }
 }
 
-/** A vehicle that crossed an intersection stop line and can be routed to another node. */
+/** A vehicle whose rear bumper cleared the movement trajectory and can enter a downstream link. */
 data class VehicleDepartureEvent(
     val timeSeconds: Double,
     val connectionId: String,
@@ -95,7 +95,7 @@ data class TrafficSimulationDemand(
         require(durationSeconds in 60..7200)
         require(timeStepSeconds in 0.05..1.0)
         require(movements.map { it.connectionId }.distinct().size == movements.size)
-        require(externalArrivals.all { it.timeSeconds <= durationSeconds && it.connectionId.isNotBlank() })
+        require(externalArrivals.all { it.timeSeconds.isFinite() && it.timeSeconds >= 0.0 && it.connectionId.isNotBlank() })
         require(approachStorageLengthMeters.isFinite() && approachStorageLengthMeters in 20.0..1000.0)
         require(approachSpeedKmh.isFinite() && approachSpeedKmh in 5.0..80.0)
         require(minimumGapMeters == null || (minimumGapMeters.isFinite() && minimumGapMeters in 0.5..10.0))
