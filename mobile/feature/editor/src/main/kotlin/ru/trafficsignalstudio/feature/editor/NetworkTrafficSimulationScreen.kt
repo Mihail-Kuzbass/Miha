@@ -876,6 +876,8 @@ private fun CoordinationOffsetDiagram(
                 if (originalCycle == cycle) {
                 for (repeat in -1..2) {
                     report.phaseWindows.forEach { window ->
+                        val redYellowStart = (offset + repeat * cycle + window.redYellowStartSeconds).toFloat()
+                        val redYellowEnd = (offset + repeat * cycle + window.redYellowEndSeconds).toFloat()
                         val phaseStart = (offset + repeat * cycle + window.startSeconds).toFloat()
                         val greenEnd = (offset + repeat * cycle + window.flashingGreenEndSeconds).toFloat()
                         val yellowEnd = (offset + repeat * cycle + window.yellowEndSeconds).toFloat()
@@ -889,6 +891,7 @@ private fun CoordinationOffsetDiagram(
                                     androidx.compose.ui.geometry.Size((clippedEnd - clippedStart) * pxPerSecond, 18f))
                             }
                         }
+                        segment(redYellowStart, redYellowEnd, Color(0xFFFF8F00))
                         segment(phaseStart, greenEnd, Color(0xFF43A047))
                         segment(greenEnd, yellowEnd, Color(0xFFFFC107))
                         segment(yellowEnd, redEnd, Color(0xFFE53935))
@@ -913,6 +916,7 @@ private fun CoordinationOffsetDiagram(
         modifier = Modifier.fillMaxWidth()
     )
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("■ Красный + жёлтый", color = Color(0xFFFF8F00), style = MaterialTheme.typography.labelSmall)
         Text("■ Зелёный", color = Color(0xFF43A047), style = MaterialTheme.typography.labelSmall)
         Text("■ Жёлтый", color = Color(0xFFFFC107), style = MaterialTheme.typography.labelSmall)
         Text("■ Красный", color = Color(0xFFE53935), style = MaterialTheme.typography.labelSmall)
