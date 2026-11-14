@@ -288,10 +288,7 @@ object NetworkCoordinationCalculator {
             )
         }
         val objective = linkResults.sumOf { it.progressionBandwidthSeconds * it.flowSharePercent / 100.0 }
-        val hasBlockingErrors = diagnostics.any {
-            it.code != CoordinationIssueCode.UNREACHABLE_INTERSECTION &&
-                it.code != CoordinationIssueCode.NO_COORDINATED_LINKS
-        }
+        val hasBlockingErrors = diagnostics.any { !it.isWarning }
         return NetworkCoordinationReport(
             cycleLengthSeconds = cycle,
             offsetsSeconds = offsets.mapValues { it.value.mod(cycle) },
