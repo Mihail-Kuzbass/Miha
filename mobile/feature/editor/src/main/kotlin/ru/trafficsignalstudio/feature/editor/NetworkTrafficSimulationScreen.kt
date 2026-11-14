@@ -44,6 +44,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.trafficsignalstudio.geometry.CrashRiskBand
+import ru.trafficsignalstudio.geometry.CrashSimulationMode
+import ru.trafficsignalstudio.geometry.ManualCrashEvent
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
 import ru.trafficsignalstudio.geometry.NetworkCoordinationCalculator
 import ru.trafficsignalstudio.geometry.TrafficSimulationDemand
@@ -84,6 +87,14 @@ fun NetworkTrafficSimulationScreen(
     var inputError by remember { mutableStateOf<String?>(null) }
     var showLinkDialog by remember { mutableStateOf(false) }
     var showCoordinationDialog by remember { mutableStateOf(false) }
+    var crashMode by remember(project.id) { mutableStateOf(CrashSimulationMode.REALISTIC) }
+    var manualCrashTime by remember(project.id) { mutableStateOf("300") }
+    var manualCrashBand by remember(project.id) { mutableStateOf(CrashRiskBand.INTERSECTION_CONFLICT) }
+    var manualCrashTarget by remember(project.id) { mutableStateOf(intersections.firstOrNull()?.id.orEmpty()) }
+    var manualCrashEvents by remember(project.id) { mutableStateOf(emptyList<ManualCrashEvent>()) }
+    val movementLabelsByIntersection = remember(intersections) {
+        intersections.associate { node -> node.id to movementDisplayLabels(node) }
+    }
 
     LaunchedEffect(isPlaying, results) {
         val lastIndex = results.values.firstOrNull()?.snapshots?.lastIndex ?: 0
@@ -120,6 +131,78 @@ fun NetworkTrafficSimulationScreen(
                 Text("Связать потоки")
             }
         }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Моделирование ДТП", style = MaterialTheme.typography.titleMedium)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        CrashSimulationMode.REALISTIC to "Реализм",
+                        CrashSimulationMode.DISABLED to "Без ДТП",
+                        CrashSimulationMode.EXPERIMENTAL to "Эксперимент"
+                    ).forEach { (mode, title) ->
+                        if (crashMode == mode) Button(onClick = { crashMode = mode; results = emptyMap() }, modifier = Modifier.weight(1f)) {
+                            Text(title)
+                        } else OutlinedButton(onClick = { crashMode = mode; results = emptyMap() }, modifier = Modifier.weight(1f)) {
+                            Text(title)
+                        }
+                    }
+                }
+                Text(
+                    when (crashMode) {
+                        CrashSimulationMode.REALISTIC -> "Автоматические сценарии и фактические столкновения."
+                        CrashSimulationMode.DISABLED -> "ДТП отключены; алгоритмы предотвращения столкновений остаются активными."
+                        CrashSimulationMode.EXPERIMENTAL -> "Автоматические сценарии отключены. Фактический контакт и заданные события учитываются."
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (crashMode == CrashSimulationMode.EXPERIMENTAL) {
+                    NetworkDropdown("Перекрёсток для события", intersections.map { NetworkChoice(it.id, it.name) },
+                        manualCrashTarget) { manualCrashTarget = it }
+                    OutlinedTextField(
+                        value = manualCrashTime,
+                        onValueChange = { manualCrashTime = it.filter(Char::isDigit) },
+                        label = { Text("Время события от начала, с") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(
+                            CrashRiskBand.FOLLOWING_DISTANCE to "Дистанция",
+                            CrashRiskBand.INTERSECTION_CONFLICT to "Конфликт",
+                            CrashRiskBand.MULTI_VEHICLE to "Групповое"
+                        ).forEach { (band, title) ->
+                            if (manualCrashBand == band) Button(onClick = { manualCrashBand = band }, modifier = Modifier.weight(1f)) {
+                                Text(title)
+                            } else OutlinedButton(onClick = { manualCrashBand = band }, modifier = Modifier.weight(1f)) {
+                                Text(title)
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val seconds = manualCrashTime.toDoubleOrNull()
+                            if (manualCrashTarget.isNotBlank() && seconds != null && seconds in 0.0..(durationMinutes * 60.0)) {
+                                manualCrashEvents = manualCrashEvents + ManualCrashEvent(seconds, manualCrashBand, manualCrashTarget)
+                                results = emptyMap()
+                            } else inputError = "Выберите перекрёсток и укажите время внутри моделирования"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Добавить аварийное событие") }
+                    manualCrashEvents.forEachIndexed { eventIndex, event ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            val targetName = intersections.firstOrNull { it.id == event.targetIntersectionId }?.name ?: "Неизвестный узел"
+                            Text("$targetName · ${event.timeSeconds.toInt()} с · ${event.band.name}",
+                                modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(onClick = {
+                                manualCrashEvents = manualCrashEvents.filterIndexed { index, _ -> index != eventIndex }
+                                results = emptyMap()
+                            }) { Text("Удалить") }
+                        }
+                    }
+                }
+            }
+        }
+
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Параметры координации", style = MaterialTheme.typography.titleMedium)
@@ -170,7 +253,7 @@ fun NetworkTrafficSimulationScreen(
                                 intensityValues = intensityValues + (key to raw.filter { it.isDigit() || it == '.' || it == ',' })
                                 results = emptyMap()
                             },
-                            label = { Text("Движение ${movementIndex + 1}, авт./ч") },
+                            label = { Text("${movementLabelsByIntersection[node.id]?.get(movement.id) ?: "Траектория не определена"}, авт./ч") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
@@ -189,8 +272,10 @@ fun NetworkTrafficSimulationScreen(
                         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("${from?.name ?: "Удалённый узел"} → ${to?.name ?: "Удалённый узел"}")
-                            Text("${link.flowSharePercent.toInt()}% потока · ${link.distanceMeters.toInt()} м",
+                            Text("${movementLabelsByIntersection[link.fromIntersectionId]?.get(link.fromMovementConnectionId) ?: "Исходная траектория не найдена"} → ${movementLabelsByIntersection[link.toIntersectionId]?.get(link.toMovementConnectionId) ?: "Конечная траектория не найдена"}",
                                 style = MaterialTheme.typography.bodySmall)
+                            Text("${link.flowSharePercent.toInt()}% потока · ${link.distanceMeters.toInt()} м",
+                                style = MaterialTheme.typography.labelSmall)
                         }
                         TextButton(onClick = {
                             val updatedNetwork = network.copy(trafficLinks = network.trafficLinks.filterNot { it.id == link.id })
@@ -245,7 +330,9 @@ fun NetworkTrafficSimulationScreen(
                                     movements = demands,
                                     durationSeconds = durationMinutes * 60,
                                     signalOffsetSeconds = offset,
-                                    signalCycleLengthSeconds = if (coordination.enabled) coordination.cycleLengthSeconds else null
+                                    signalCycleLengthSeconds = if (coordination.enabled) coordination.cycleLengthSeconds else null,
+                                    crashMode = crashMode,
+                                    manualCrashEvents = if (crashMode == CrashSimulationMode.EXPERIMENTAL) manualCrashEvents else emptyList()
                                 ))
                             }
                             val baseline = intersections.associate { node ->
@@ -309,6 +396,7 @@ fun NetworkTrafficSimulationScreen(
     if (showLinkDialog) {
         NetworkLinkDialog(
             intersections = intersections,
+            movementLabelsByIntersection = movementLabelsByIntersection,
             onDismiss = { showLinkDialog = false },
             onAdd = { link ->
                 val updatedNetwork = network.copy(trafficLinks = network.trafficLinks + link)
@@ -342,6 +430,7 @@ fun NetworkTrafficSimulationScreen(
 @Composable
 private fun NetworkLinkDialog(
     intersections: List<Intersection>,
+    movementLabelsByIntersection: Map<String, Map<String, String>>,
     onDismiss: () -> Unit,
     onAdd: (NetworkTrafficLink) -> Unit
 ) {
@@ -367,10 +456,10 @@ private fun NetworkLinkDialog(
                     toMovement = intersections.firstOrNull { node -> node.id == it }?.laneConnections?.firstOrNull()?.id.orEmpty()
                 }
                 NetworkDropdown("Выходное движение", source?.laneConnections.orEmpty().mapIndexed { i, m ->
-                    NetworkChoice(m.id, "Движение ${i + 1} · ${m.id.take(6)}")
+                    NetworkChoice(m.id, movementLabelsByIntersection[fromNode]?.get(m.id) ?: "Траектория не определена")
                 }, fromMovement) { fromMovement = it }
                 NetworkDropdown("Входное движение", target?.laneConnections.orEmpty().mapIndexed { i, m ->
-                    NetworkChoice(m.id, "Движение ${i + 1} · ${m.id.take(6)}")
+                    NetworkChoice(m.id, movementLabelsByIntersection[toNode]?.get(m.id) ?: "Траектория не определена")
                 }, toMovement) { toMovement = it }
                 OutlinedTextField(value = share, onValueChange = { share = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
                     label = { Text("Доля передаваемого потока, %") }, singleLine = true)

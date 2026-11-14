@@ -41,6 +41,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.trafficsignalstudio.geometry.CrashRiskBand
+import ru.trafficsignalstudio.geometry.CrashSimulationMode
+import ru.trafficsignalstudio.geometry.ManualCrashEvent
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
 import ru.trafficsignalstudio.geometry.SignalPlanTimingAnalyzer
 import ru.trafficsignalstudio.geometry.TrafficSimulationDemand
@@ -128,6 +131,13 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
     var panOffset by remember(intersection.id) { mutableStateOf(Offset.Zero) }
     var inputError by remember(intersection.id) { mutableStateOf<String?>(null) }
     var isSimulating by remember(intersection.id) { mutableStateOf(false) }
+    var crashMode by remember(intersection.id) { mutableStateOf(CrashSimulationMode.REALISTIC) }
+    var manualCrashTime by remember(intersection.id) { mutableStateOf("300") }
+    var manualCrashBand by remember(intersection.id) { mutableStateOf(CrashRiskBand.INTERSECTION_CONFLICT) }
+    var manualCrashEvents by remember(intersection.id) { mutableStateOf(emptyList<ManualCrashEvent>()) }
+    val movementLabels = remember(intersection.id, intersection.approaches, intersection.laneConnections) {
+        movementDisplayLabels(intersection)
+    }
     val simulationScope = rememberCoroutineScope()
     val timingReport = remember(intersection.id, intersection.signalPlan, intersection.laneConnections) {
         SignalPlanTimingAnalyzer.analyze(intersection)
@@ -192,8 +202,8 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
             val form = forms[connection.id] ?: MovementDemandForm("600", defaultCategories)
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Движение ${index + 1}", style = MaterialTheme.typography.titleMedium)
-                    Text("Полоса ${connection.fromLaneId.take(8)} → ${connection.toLaneId.take(8)}",
+                    Text(movementLabels[connection.id] ?: "Траектория не определена", style = MaterialTheme.typography.titleMedium)
+                    Text("Идентификатор связи: ${connection.id.take(8)}",
                         style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(
                         value = form.total,
@@ -256,6 +266,81 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
         }
         Text("Длина подхода задаёт конечную вместимость полосы до стоп-линии. Если свободного места нет, прибывающие ТС учитываются как подпор за пределами моделируемого участка.",
             style = MaterialTheme.typography.bodySmall)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Моделирование ДТП", style = MaterialTheme.typography.titleMedium)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        CrashSimulationMode.REALISTIC to "Реализм",
+                        CrashSimulationMode.DISABLED to "Без ДТП",
+                        CrashSimulationMode.EXPERIMENTAL to "Эксперимент"
+                    ).forEach { (mode, title) ->
+                        if (crashMode == mode) Button(onClick = { crashMode = mode; result = null }, modifier = Modifier.weight(1f)) {
+                            Text(title)
+                        } else OutlinedButton(onClick = { crashMode = mode; result = null }, modifier = Modifier.weight(1f)) {
+                            Text(title)
+                        }
+                    }
+                }
+                Text(
+                    when (crashMode) {
+                        CrashSimulationMode.REALISTIC -> "Автоматические аварийные сценарии и регистрация фактического контакта."
+                        CrashSimulationMode.DISABLED -> "ДТП не регистрируются и не блокируют полосы. Предотвращение столкновений продолжает работать."
+                        CrashSimulationMode.EXPERIMENTAL -> "Фактический контакт регистрируется; автоматические сценарии заменены событиями, заданными вручную."
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (crashMode == CrashSimulationMode.EXPERIMENTAL) {
+                    OutlinedTextField(
+                        value = manualCrashTime,
+                        onValueChange = { manualCrashTime = it.filter(Char::isDigit) },
+                        label = { Text("Время события от начала, с") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Text("Тип аварийного сценария", style = MaterialTheme.typography.labelLarge)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(
+                            CrashRiskBand.FOLLOWING_DISTANCE to "Дистанция",
+                            CrashRiskBand.INTERSECTION_CONFLICT to "Конфликт",
+                            CrashRiskBand.MULTI_VEHICLE to "Групповое"
+                        ).forEach { (band, title) ->
+                            if (manualCrashBand == band) Button(onClick = { manualCrashBand = band }, modifier = Modifier.weight(1f)) {
+                                Text(title)
+                            } else OutlinedButton(onClick = { manualCrashBand = band }, modifier = Modifier.weight(1f)) {
+                                Text(title)
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val seconds = manualCrashTime.toDoubleOrNull()
+                            if (seconds != null && seconds in 0.0..(durationMinutes * 60.0)) {
+                                manualCrashEvents = manualCrashEvents + ManualCrashEvent(seconds, manualCrashBand, intersection.id)
+                                result = null
+                            } else inputError = "Время события должно находиться внутри моделирования"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Добавить аварийное событие") }
+                    manualCrashEvents.forEachIndexed { eventIndex, event ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            val eventTitle = when (event.band) {
+                                CrashRiskBand.FOLLOWING_DISTANCE -> "Несоблюдение дистанции"
+                                CrashRiskBand.INTERSECTION_CONFLICT -> "Конфликт на перекрёстке"
+                                CrashRiskBand.MULTI_VEHICLE -> "Групповое ДТП"
+                                CrashRiskBand.NO_CRASH -> "Без ДТП"
+                            }
+                            Text("${event.timeSeconds.toInt()} с · $eventTitle", modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(onClick = {
+                                manualCrashEvents = manualCrashEvents.filterIndexed { index, _ -> index != eventIndex }
+                                result = null
+                            }) { Text("Удалить") }
+                        }
+                    }
+                }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(5, 10, 15, 30).forEach { minutes ->
                 if (durationMinutes == minutes) Button(onClick = { durationMinutes = minutes }) { Text("${minutes} мин") }
@@ -285,7 +370,9 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                             movements = demands,
                             durationSeconds = durationMinutes * 60,
                             approachStorageLengthMeters = storageMeters,
-                            approachSpeedKmh = entrySpeedKmh
+                            approachSpeedKmh = entrySpeedKmh,
+                            crashMode = crashMode,
+                            manualCrashEvents = if (crashMode == CrashSimulationMode.EXPERIMENTAL) manualCrashEvents else emptyList()
                         )
                         inputError = null
                         isSimulating = true
