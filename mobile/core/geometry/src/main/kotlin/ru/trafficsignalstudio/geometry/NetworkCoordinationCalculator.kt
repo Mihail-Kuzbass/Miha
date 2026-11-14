@@ -352,8 +352,8 @@ object NetworkCoordinationCalculator {
     ): Double {
         val sourceStart = sourceOffset + sourceWindow.start + travelTime
         val sourceEnd = sourceOffset + sourceWindow.end + travelTime
-        val targetStart = targetOffset + targetWindow.start
-        val targetEnd = targetOffset + targetWindow.end
+        val targetStart = (targetOffset + targetWindow.start).toDouble()
+        val targetEnd = (targetOffset + targetWindow.end).toDouble()
         var overlap = 0.0
         for (shift in -2..2) {
             val shiftedStart = targetStart + shift * cycle
