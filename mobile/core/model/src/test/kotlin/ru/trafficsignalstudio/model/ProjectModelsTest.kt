@@ -43,6 +43,13 @@ class ProjectModelsTest {
     }
 
     @Test
+    fun signalPhaseDefaultsToGOSTRedYellowTransition() {
+        val phase = SignalPhase(name = "Основная", greenConnectionIds = setOf("movement"))
+        assertEquals(2, phase.redYellowSeconds)
+        assertEquals(3, phase.yellowSeconds)
+    }
+
+    @Test
     fun laneDefaultsToThroughMovement() {
         val lane = Lane(index = 1)
         assertTrue(lane.allowedMovements.contains(MovementKind.THROUGH))
