@@ -164,6 +164,9 @@ data class NetworkTrafficLink(
             "Геометрия межузловой дороги должна содержать минимум две точки."
         }
         require(centerline.all { it.xMeters.isFinite() && it.yMeters.isFinite() })
+        require(centerline.isEmpty() || centerline.zipWithNext().sumOf { (a, b) ->
+            kotlin.math.hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters)
+        } > 1e-6) { "Геометрия межузловой дороги должна иметь ненулевую длину." }
         require(laneWidthMeters.isFinite() && laneWidthMeters in 2.5..5.0)
     }
 }
