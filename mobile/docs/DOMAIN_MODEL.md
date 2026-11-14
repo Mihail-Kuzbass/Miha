@@ -16,7 +16,7 @@
 
 Упрощённая схема агрегатов:
 
-§§§text
+```text
 ProjectDocument
 └── RoadNetwork
     ├── Intersection[]
@@ -31,11 +31,11 @@ ProjectDocument
     │       └── SignalPhase[]
     ├── NetworkTrafficLink[]
     └── NetworkCoordinationSettings
-§§§
+```
 
 ### Корневой документ
 
-§§§kotlin
+```kotlin
 data class ProjectDocument(
     val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
     val id: String = UUID.randomUUID().toString(),
@@ -48,7 +48,7 @@ data class ProjectDocument(
         const val CURRENT_SCHEMA_VERSION = 8
     }
 }
-§§§
+```
 
 Один документ может содержать один или несколько перекрёстков. Для одиночного проекта RoadNetwork.intersections содержит один элемент. Для сетевого проекта — несколько элементов и связи между их движениями.
 
@@ -65,7 +65,7 @@ RoadSegmentKind различает прямой сегмент, ломаную, 
 
 ### Движения и сигнализация
 
-§§§kotlin
+```kotlin
 data class LaneConnection(
     val id: String = UUID.randomUUID().toString(),
     val fromApproachId: String,
@@ -83,7 +83,7 @@ data class SignalPhase(
     val yellowSeconds: Int = 3,
     val allRedSeconds: Int = 1
 )
-§§§
+```
 
 В текущей версии LaneConnection является явной связью «въездная полоса → выездная полоса». MovementKind хранит тип разрешённого манёвра полосы. Отображаемая подпись движения должна строиться из названий подходов, индексов полос и вида манёвра. Не показывать пользователю внутренние UUID или условные номера без контекста.
 
@@ -151,7 +151,7 @@ VehiclePose хранит ID экземпляра, ссылку на модель
 
 Следующие структуры являются проектным направлением, а не уже реализованными классами. Их следует добавлять после согласования формата TSS и тестов.
 
-§§§kotlin
+```kotlin
 data class TrafficDemandProfile(
     val id: String,
     val connectionId: String,
@@ -188,7 +188,7 @@ data class SimulationResultSummary(
     val meanDelaySeconds: Double,
     val maximumQueueMeters: Double
 )
-§§§
+```
 
 Для классов ТС сумма потоков по классам не должна превышать общую интенсивность. Остаток должен обрабатываться явным правилом, а не теряться. Интервалы спроса не должны перекрываться неоднозначно для одной и той же сущности. Seed и версия движка обязательны для воспроизводимости результатов.
 
