@@ -12,6 +12,9 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 import kotlin.math.pow
 
+/** Reserved high-bit range for vehicle identities preserved across network nodes. */
+const val NETWORK_VEHICLE_ID_BASE: Long = 1L shl 62
+
 /**
  * Total flow includes the explicitly classified flows. Any remainder is kept as
  * unclassified demand (rendered with the default passenger-car model only).
@@ -1046,7 +1049,11 @@ object TrafficSimulationEngine {
                 val targetState = states[event.connectionId]
                 if (targetState != null) {
                     targetState.pending.addLast(WaitingVehicle(
-                        id = nextId++,
+                        id = if (event.sourceVehicleId >= NETWORK_VEHICLE_ID_BASE) {
+                            event.sourceVehicleId
+                        } else {
+                            nextId++
+                        },
                         vehicleClass = event.vehicleClass,
                         model = createModel(event.vehicleClass),
                         arrivalTime = event.timeSeconds,
