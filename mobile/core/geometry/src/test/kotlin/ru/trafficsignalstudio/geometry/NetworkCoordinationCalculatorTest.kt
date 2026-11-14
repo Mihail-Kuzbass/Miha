@@ -44,7 +44,7 @@ class NetworkCoordinationCalculatorTest {
         reference: String = "A"
     ) = NetworkCoordinationSettings(
         enabled = true,
-        cycleLengthSeconds = 50,
+        cycleLengthSeconds = 54,
         progressionSpeedKmh = 50.0,
         referenceIntersectionId = reference,
         direction = direction
