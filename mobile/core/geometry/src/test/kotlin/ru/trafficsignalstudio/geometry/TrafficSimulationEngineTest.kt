@@ -24,6 +24,22 @@ class TrafficSimulationEngineTest {
         )
     }
 
+    @Test fun upstreamVehicleArrivalsAreInjectedAtTheirScheduledTimesAndCanDepart() {
+        val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
+            movements = listOf(MovementTrafficDemand("m1", 0.0)),
+            externalArrivals = listOf(
+                ExternalVehicleArrival(30.0, "m1", VehicleClass.CITY_BUS, 101L),
+                ExternalVehicleArrival(45.0, "m1", VehicleClass.RIGID_TRUCK, 102L)
+            ),
+            durationSeconds = 180
+        ))
+        assertEquals(2, result.totalArrivals)
+        assertTrue(result.departureEvents.isNotEmpty())
+        assertTrue(result.departureEvents.all { it.connectionId == "m1" && it.timeSeconds >= 30.0 })
+        assertTrue(result.departureEvents.any { it.vehicleClass == VehicleClass.CITY_BUS })
+        assertTrue(result.departureEvents.any { it.vehicleClass == VehicleClass.RIGID_TRUCK })
+    }
+
     @Test fun classSpecificFlowsAreIncludedInTotalArrivals() {
         val result = TrafficSimulationEngine.run(signalizedIntersection(), TrafficSimulationDemand(
             movements = listOf(MovementTrafficDemand("m1", 360.0,
