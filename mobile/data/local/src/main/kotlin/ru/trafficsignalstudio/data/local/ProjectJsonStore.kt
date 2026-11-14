@@ -170,6 +170,16 @@ class ProjectJsonStore(context: Context) {
                     put("flowSharePercent", link.flowSharePercent)
                     put("distanceMeters", link.distanceMeters)
                     put("enabled", link.enabled)
+                    put("travelSpeedKmh", link.travelSpeedKmh)
+                    put("laneCount", link.laneCount)
+                    put("queueStorageLengthMeters", link.queueStorageLengthMeters)
+                    put("laneWidthMeters", link.laneWidthMeters)
+                    put("laneChangesEnabled", link.laneChangesEnabled)
+                    put("centerline", JSONArray().apply {
+                        link.centerline.forEach { point ->
+                            put(JSONObject().put("x", point.xMeters).put("y", point.yMeters))
+                        }
+                    })
                 })
             }
         }).put("coordination", JSONObject().apply {
@@ -341,7 +351,19 @@ class ProjectJsonStore(context: Context) {
                     toMovementConnectionId = link.getString("toMovementConnectionId"),
                     flowSharePercent = link.optDouble("flowSharePercent", 100.0),
                     distanceMeters = link.optDouble("distanceMeters", 500.0),
-                    enabled = link.optBoolean("enabled", true)
+                    enabled = link.optBoolean("enabled", true),
+                    travelSpeedKmh = link.optDouble("travelSpeedKmh", 30.0).coerceIn(5.0, 120.0),
+                    laneCount = link.optInt("laneCount", 1).coerceIn(1, 8),
+                    queueStorageLengthMeters = link.optDouble("queueStorageLengthMeters", 120.0).coerceIn(1.0, 5000.0),
+                    laneWidthMeters = link.optDouble("laneWidthMeters", 3.5).coerceIn(2.5, 5.0),
+                    laneChangesEnabled = link.optBoolean("laneChangesEnabled", true),
+                    centerline = (link.optJSONArray("centerline") ?: JSONArray()).let { points ->
+                        (0 until points.length()).mapNotNull { pointIndex ->
+                            points.optJSONObject(pointIndex)?.let { point ->
+                                Point2D(point.optDouble("x"), point.optDouble("y"))
+                            }
+                        }.takeIf { it.size >= 2 }.orEmpty()
+                    }
                 )
             }.getOrNull()
         }
