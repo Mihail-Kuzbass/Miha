@@ -148,6 +148,7 @@ class ProjectJsonStore(context: Context) {
                                             put("name", phase.name)
                                             put("greenConnectionIds", JSONArray(phase.greenConnectionIds.toList()))
                                             put("greenSeconds", phase.greenSeconds)
+                                            put("redYellowSeconds", phase.redYellowSeconds)
                                             put("flashingGreenSeconds", phase.flashingGreenSeconds)
                                             put("yellowSeconds", phase.yellowSeconds)
                                             put("allRedSeconds", phase.allRedSeconds)
@@ -318,6 +319,7 @@ class ProjectJsonStore(context: Context) {
                             name = phase.optString("name", "Фаза " + (phaseIndex + 1)),
                             greenConnectionIds = (0 until greens.length()).map { greens.getString(it) }.toSet(),
                             greenSeconds = phase.optInt("greenSeconds", 30),
+                            redYellowSeconds = phase.optInt("redYellowSeconds", 2),
                             flashingGreenSeconds = phase.optInt("flashingGreenSeconds", 3),
                             yellowSeconds = phase.optInt("yellowSeconds", 3),
                             allRedSeconds = phase.optInt("allRedSeconds", 1)
