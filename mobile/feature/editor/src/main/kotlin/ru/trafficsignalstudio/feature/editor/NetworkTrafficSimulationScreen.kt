@@ -397,6 +397,7 @@ fun NetworkTrafficSimulationScreen(
         NetworkLinkDialog(
             intersections = intersections,
             movementLabelsByIntersection = movementLabelsByIntersection,
+            existingLinks = network.trafficLinks,
             onDismiss = { showLinkDialog = false },
             onAdd = { link ->
                 val updatedNetwork = network.copy(trafficLinks = network.trafficLinks + link)
@@ -431,6 +432,7 @@ fun NetworkTrafficSimulationScreen(
 private fun NetworkLinkDialog(
     intersections: List<Intersection>,
     movementLabelsByIntersection: Map<String, Map<String, String>>,
+    existingLinks: List<NetworkTrafficLink>,
     onDismiss: () -> Unit,
     onAdd: (NetworkTrafficLink) -> Unit
 ) {
@@ -440,8 +442,13 @@ private fun NetworkLinkDialog(
     var toMovement by remember { mutableStateOf(intersections.getOrNull(1)?.laneConnections?.firstOrNull()?.id.orEmpty()) }
     var share by remember { mutableStateOf("100") }
     var distance by remember { mutableStateOf("500") }
+    var validationError by remember { mutableStateOf<String?>(null) }
     val source = intersections.firstOrNull { it.id == fromNode }
     val target = intersections.firstOrNull { it.id == toNode }
+    val alreadyAllocatedPercent = existingLinks
+        .filter { it.enabled && it.fromIntersectionId == fromNode && it.fromMovementConnectionId == fromMovement }
+        .sumOf { it.flowSharePercent }
+    val availableSharePercent = (100.0 - alreadyAllocatedPercent).coerceAtLeast(0.0)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Связь транспортных потоков") },
@@ -449,7 +456,12 @@ private fun NetworkLinkDialog(
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 NetworkDropdown("От перекрёстка", intersections.map { NetworkChoice(it.id, it.name) }, fromNode) {
                     fromNode = it
+                    if (toNode == it) {
+                        toNode = intersections.firstOrNull { node -> node.id != it }?.id.orEmpty()
+                        toMovement = intersections.firstOrNull { node -> node.id == toNode }?.laneConnections?.firstOrNull()?.id.orEmpty()
+                    }
                     fromMovement = intersections.firstOrNull { node -> node.id == it }?.laneConnections?.firstOrNull()?.id.orEmpty()
+                    validationError = null
                 }
                 NetworkDropdown("К перекрёстку", intersections.filter { it.id != fromNode }.map { NetworkChoice(it.id, it.name) }, toNode) {
                     toNode = it
@@ -457,27 +469,38 @@ private fun NetworkLinkDialog(
                 }
                 NetworkDropdown("Выходное движение", source?.laneConnections.orEmpty().mapIndexed { i, m ->
                     NetworkChoice(m.id, movementLabelsByIntersection[fromNode]?.get(m.id) ?: "Траектория не определена")
-                }, fromMovement) { fromMovement = it }
+                }, fromMovement) { fromMovement = it; validationError = null }
                 NetworkDropdown("Входное движение", target?.laneConnections.orEmpty().mapIndexed { i, m ->
                     NetworkChoice(m.id, movementLabelsByIntersection[toNode]?.get(m.id) ?: "Траектория не определена")
                 }, toMovement) { toMovement = it }
-                OutlinedTextField(value = share, onValueChange = { share = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                    label = { Text("Доля передаваемого потока, %") }, singleLine = true)
+                Text("Уже распределено: ${"%.1f".format(alreadyAllocatedPercent)}% · доступно: ${"%.1f".format(availableSharePercent)}%",
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(value = share, onValueChange = {
+                    share = it.filter { c -> c.isDigit() || c == '.' || c == ',' }
+                    validationError = null
+                }, label = { Text("Доля передаваемого потока, %") }, singleLine = true)
                 OutlinedTextField(value = distance, onValueChange = { distance = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
                     label = { Text("Расстояние между узлами, м") }, singleLine = true)
+                validationError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
         confirmButton = {
             TextButton(onClick = {
                 val shareValue = share.replace(',', '.').toDoubleOrNull()
                 val distanceValue = distance.replace(',', '.').toDoubleOrNull()
-                if (source != null && target != null && fromMovement.isNotBlank() && toMovement.isNotBlank() &&
-                    shareValue != null && shareValue in 0.0..100.0 && distanceValue != null && distanceValue in 1.0..100000.0) {
+                if (source != null && target != null && source.id != target.id &&
+                    fromMovement.isNotBlank() && toMovement.isNotBlank() &&
+                    shareValue != null && shareValue > 0.0 && shareValue <= availableSharePercent + 1e-6 &&
+                    distanceValue != null && distanceValue in 1.0..100000.0) {
                     onAdd(NetworkTrafficLink(
                         fromIntersectionId = fromNode, fromMovementConnectionId = fromMovement,
                         toIntersectionId = toNode, toMovementConnectionId = toMovement,
                         flowSharePercent = shareValue, distanceMeters = distanceValue
                     ))
+                } else {
+                    validationError = if (shareValue != null && shareValue > availableSharePercent + 1e-6)
+                        "Для этого выходного движения осталось распределить не более ${"%.1f".format(availableSharePercent)}% потока."
+                    else "Проверьте перекрёстки, движения, долю (больше 0%) и расстояние."
                 }
             }) { Text("Добавить связь") }
         },

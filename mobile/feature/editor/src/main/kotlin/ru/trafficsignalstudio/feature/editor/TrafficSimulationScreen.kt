@@ -517,8 +517,8 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text("Результаты по движениям", style = MaterialTheme.typography.titleMedium)
-                    simulation.movementMetrics.forEachIndexed { index, metric ->
-                        MetricLine("Движение ${index + 1}",
+                    simulation.movementMetrics.forEach { metric ->
+                        MetricLine(movementLabels[metric.connectionId] ?: "Траектория ${metric.connectionId.take(8)}",
                             "${metric.departures}/${metric.arrivals} · на подходе ${metric.queueVehiclesAtEnd} авт. · занято ${"%.1f".format(metric.queueLengthMetersAtEnd)} м · внешний затор ${metric.spillbackVehiclesAtEnd}")
                     }
                 }
