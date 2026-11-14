@@ -64,6 +64,28 @@ class NetworkCoordinationCalculatorTest {
         assertEquals(20.0, report.links.single().progressionBandwidthSeconds, 1e-6)
     }
 
+    @Test fun coordinationUsesPolylineDistanceAndLinkSpeedLimit() {
+        val network = RoadNetwork(
+            intersections = listOf(node("A", "out-A"), node("B", "in-B")),
+            trafficLinks = listOf(
+                NetworkTrafficLink(
+                    "AB", "A", "out-A", "B", "in-B",
+                    distanceMeters = 100.0,
+                    travelSpeedKmh = 36.0,
+                    centerline = listOf(
+                        ru.trafficsignalstudio.model.Point2D(0.0, 0.0),
+                        ru.trafficsignalstudio.model.Point2D(100.0, 0.0),
+                        ru.trafficsignalstudio.model.Point2D(100.0, 100.0)
+                    )
+                )
+            )
+        )
+        val report = NetworkCoordinationCalculator.calculateReport(network, settings())
+        assertTrue(report.isValid)
+        assertEquals(20.0, report.links.single().travelTimeSeconds, 1e-6)
+        assertEquals(20, report.offsetsSeconds["B"])
+    }
+
     @Test fun reverseCoordinationSwapsTheMovementPair() {
         val network = RoadNetwork(
             intersections = listOf(node("A", "out-A"), node("B", "in-B")),
