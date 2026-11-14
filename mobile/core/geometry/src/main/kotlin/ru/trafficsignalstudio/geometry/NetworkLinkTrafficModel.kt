@@ -49,7 +49,10 @@ object NetworkLinkTrafficModel {
         val minimumGapMeters: Double,
         val centerline: List<ru.trafficsignalstudio.model.Point2D> = emptyList(),
         val laneCount: Int = 1,
-        val laneWidthMeters: Double = 3.5
+        val laneWidthMeters: Double = 3.5,
+        val laneChangeFromLaneIndex: Int? = null,
+        val laneChangeStartSeconds: Double = 0.0,
+        val laneChangeEndSeconds: Double = 0.0
     )
 
     data class VehicleSnapshot(
@@ -62,7 +65,8 @@ object NetworkLinkTrafficModel {
         val lengthMeters: Double,
         val widthMeters: Double,
         val worldPoint: ru.trafficsignalstudio.model.Point2D,
-        val headingRadians: Double
+        val headingRadians: Double,
+        val laneChangeProgress: Double = 1.0
     )
 
     data class Result(
@@ -104,20 +108,35 @@ object NetworkLinkTrafficModel {
                 ru.trafficsignalstudio.model.Point2D(schedule.distanceMeters, 0.0)
             )
         }
-        val pose = NetworkRoadGeometry.poseAt(
+        val laneChangeDuration = schedule.laneChangeEndSeconds - schedule.laneChangeStartSeconds
+        val laneChangeProgress = if (schedule.laneChangeFromLaneIndex == null || laneChangeDuration <= 0.0) 1.0
+            else ((timeSeconds - schedule.laneChangeStartSeconds) / laneChangeDuration).coerceIn(0.0, 1.0)
+        val targetPose = NetworkRoadGeometry.poseAt(
             path, position, schedule.laneIndex, schedule.laneCount, schedule.laneWidthMeters
         )
+        val pose = schedule.laneChangeFromLaneIndex?.let { sourceLane ->
+            val sourcePose = NetworkRoadGeometry.poseAt(
+                path, position, sourceLane, schedule.laneCount, schedule.laneWidthMeters
+            )
+            ru.trafficsignalstudio.model.Point2D(
+                sourcePose.point.xMeters + (targetPose.point.xMeters - sourcePose.point.xMeters) * laneChangeProgress,
+                sourcePose.point.yMeters + (targetPose.point.yMeters - sourcePose.point.yMeters) * laneChangeProgress
+            ) to sourcePose
+        }
+        val worldPoint = pose?.first ?: targetPose.point
+        val heading = targetPose.headingRadians
         VehicleSnapshot(
             linkId = schedule.linkId,
             vehicleId = schedule.vehicleId,
             vehicleClass = schedule.vehicleClass,
-            laneIndex = schedule.laneIndex,
+            laneIndex = if (laneChangeProgress < 0.5) schedule.laneChangeFromLaneIndex ?: schedule.laneIndex else schedule.laneIndex,
             positionMeters = position,
             speedMetersPerSecond = speed,
             lengthMeters = schedule.lengthMeters,
             widthMeters = schedule.widthMeters,
-            worldPoint = pose.point,
-            headingRadians = pose.headingRadians
+            worldPoint = worldPoint,
+            headingRadians = heading,
+            laneChangeProgress = laneChangeProgress
         )
     }
 
@@ -142,6 +161,23 @@ object NetworkLinkTrafficModel {
             val leaderRearPosition = leaderPosition - leader.lengthMeters
             if (followerPosition + follower.minimumGapMeters >
                 leaderRearPosition - 1e-6) return false
+            time += 0.25
+        }
+        return true
+    }
+
+    private fun isSafeFollowingUntil(
+        leader: VehicleSchedule,
+        follower: VehicleSchedule,
+        untilSeconds: Double
+    ): Boolean {
+        var time = follower.entryTimeSeconds
+        val end = min(min(leader.arrivalTimeSeconds, follower.arrivalTimeSeconds), untilSeconds)
+        while (time < end) {
+            val leaderRearPosition = positionAt(leader, time) - leader.lengthMeters
+            if (positionAt(follower, time) + follower.minimumGapMeters > leaderRearPosition - 1e-6) {
+                return false
+            }
             time += 0.25
         }
         return true
@@ -212,7 +248,7 @@ object NetworkLinkTrafficModel {
                     vehicleModel.desiredTimeHeadwaySeconds,
                     (vehicleModel.lengthMeters + vehicleModel.minimumGapMeters) / speed
                 )
-                val laneIndex = nextEntryAt.indices.minByOrNull { nextEntryAt[it] } ?: 0
+                var laneIndex = nextEntryAt.indices.minByOrNull { nextEntryAt[it] } ?: 0
                 var entryTime = max(candidate.departure.timeSeconds, nextEntryAt[laneIndex])
                 val acceleration = vehicleModel.accelerationMetersPerSecondSquared.coerceAtLeast(0.1)
                 val accelTime = speed / acceleration
@@ -222,11 +258,17 @@ object NetworkLinkTrafficModel {
                 } else {
                     accelTime + (link.distanceMeters - accelDistance) / speed
                 }
-                fun scheduleAt(time: Double) = VehicleSchedule(
+                fun scheduleAt(
+                    time: Double,
+                    assignedLane: Int = laneIndex,
+                    fromLane: Int? = null,
+                    changeStart: Double = 0.0,
+                    changeEnd: Double = 0.0
+                ) = VehicleSchedule(
                     linkId = link.id,
                     vehicleId = candidate.departure.vehicleId,
                     vehicleClass = candidate.departure.vehicleClass,
-                    laneIndex = laneIndex,
+                    laneIndex = assignedLane,
                     departureTimeSeconds = candidate.departure.timeSeconds,
                     entryTimeSeconds = time,
                     arrivalTimeSeconds = time + travelTime,
@@ -238,19 +280,58 @@ object NetworkLinkTrafficModel {
                     minimumGapMeters = vehicleModel.minimumGapMeters,
                     centerline = link.centerline,
                     laneCount = link.laneCount,
-                    laneWidthMeters = link.laneWidthMeters
+                    laneWidthMeters = link.laneWidthMeters,
+                    laneChangeFromLaneIndex = fromLane,
+                    laneChangeStartSeconds = changeStart,
+                    laneChangeEndSeconds = changeEnd
                 )
                 var schedule = scheduleAt(entryTime)
-                val leader = lastVehicleOnLane[laneIndex]
-                var safetyAdjustments = 0
-                while (leader != null && !isSafeFollowing(leader, schedule) && safetyAdjustments < 10000) {
-                    entryTime += 0.25
-                    schedule = scheduleAt(entryTime)
-                    safetyAdjustments++
+                var sourceLaneForChange: Int? = null
+                val sourceLeader = lastVehicleOnLane[laneIndex]
+                if (link.laneChangesEnabled && sourceLeader != null && !isSafeFollowing(sourceLeader, schedule)) {
+                    val alternatives = nextEntryAt.indices
+                        .filter { kotlin.math.abs(it - laneIndex) == 1 }
+                        .sortedBy { nextEntryAt[it] }
+                    for (targetLane in alternatives) {
+                        val targetEntry = max(candidate.departure.timeSeconds, nextEntryAt[targetLane])
+                        val changeDuration = 2.5
+                        val candidateSchedule = scheduleAt(
+                            targetEntry, targetLane, laneIndex,
+                            targetEntry + 0.25, targetEntry + 0.25 + changeDuration
+                        )
+                        val targetLeader = lastVehicleOnLane[targetLane]
+                        val targetIsSafe = targetLeader == null || isSafeFollowing(targetLeader, candidateSchedule)
+                        val sourceIsSafeDuringChange = isSafeFollowingUntil(
+                            sourceLeader, candidateSchedule, candidateSchedule.laneChangeEndSeconds
+                        )
+                        if (targetIsSafe && sourceIsSafeDuringChange) {
+                            laneIndex = targetLane
+                            entryTime = targetEntry
+                            schedule = candidateSchedule
+                            sourceLaneForChange = candidateSchedule.laneChangeFromLaneIndex
+                            break
+                        }
+                    }
+                }
+                if (sourceLaneForChange == null) {
+                    val leader = lastVehicleOnLane[laneIndex]
+                    var safetyAdjustments = 0
+                    while (leader != null && !isSafeFollowing(leader, schedule) && safetyAdjustments < 10000) {
+                        entryTime += 0.25
+                        schedule = scheduleAt(entryTime)
+                        safetyAdjustments++
+                    }
                 }
                 val entryDelay = entryTime - candidate.departure.timeSeconds
+                val safeHeadwayAfterChange = if (sourceLaneForChange != null) 2.5 + safeHeadway else safeHeadway
                 nextEntryAt[laneIndex] = entryTime + safeHeadway
                 lastVehicleOnLane[laneIndex] = schedule
+                if (sourceLaneForChange != null) {
+                    nextEntryAt[sourceLaneForChange] = max(
+                        nextEntryAt[sourceLaneForChange],
+                        entryTime + safeHeadwayAfterChange
+                    )
+                }
                 val arrivalTime = schedule.arrivalTimeSeconds
                 entryDelays += entryDelay
                 if (entryDelay > 1e-9) {
