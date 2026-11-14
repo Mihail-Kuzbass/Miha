@@ -871,10 +871,10 @@ private fun CoordinationOffsetDiagram(
                 if (originalCycle == cycle) {
                 for (repeat in -1..2) {
                     report.phaseWindows.forEach { window ->
-                        val phaseStart = offset + repeat * cycle + window.startSeconds
-                        val greenEnd = offset + repeat * cycle + window.flashingGreenEndSeconds
-                        val yellowEnd = offset + repeat * cycle + window.yellowEndSeconds
-                        val redEnd = offset + repeat * cycle + window.allRedEndSeconds
+                        val phaseStart = (offset + repeat * cycle + window.startSeconds).toFloat()
+                        val greenEnd = (offset + repeat * cycle + window.flashingGreenEndSeconds).toFloat()
+                        val yellowEnd = (offset + repeat * cycle + window.yellowEndSeconds).toFloat()
+                        val redEnd = (offset + repeat * cycle + window.allRedEndSeconds).toFloat()
                         fun segment(start: Float, end: Float, color: Color) {
                             val clippedStart = start.coerceAtLeast(0f)
                             val clippedEnd = end.coerceAtMost(totalSeconds)
