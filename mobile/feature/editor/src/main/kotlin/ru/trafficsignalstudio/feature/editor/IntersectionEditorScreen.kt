@@ -341,6 +341,17 @@ fun IntersectionEditorScreen(
                     val selectedSegment = intersection.roadSegments.firstOrNull { it.id == selectedRoadSegmentId }
                     if (editMode && selectedSegment != null) {
                         Text("Выбрано: ${selectedSegment.name}", style = MaterialTheme.typography.titleSmall)
+                        OutlinedTextField(
+                            value = selectedSegment.name,
+                            onValueChange = { value ->
+                                updateIntersection(intersection.copy(roadSegments = intersection.roadSegments.map {
+                                    if (it.id == selectedSegment.id) it.copy(name = value) else it
+                                }))
+                            },
+                            label = { Text("Название улицы / участка") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
                         Text("Полос: ${selectedSegment.laneCount} · ширина: ${"%.2f".format(selectedSegment.widthMeters)} м")
                         if (selectedSegment.kind == RoadSegmentKind.ARC && selectedSegment.centerline.size >= 3) {
                             Text("Радиус дуги: ${"%.1f".format(selectedSegment.arcRadiusMeters ?: estimateArcRadius(selectedSegment.centerline))} м")
@@ -656,7 +667,18 @@ fun IntersectionEditorScreen(
                             }
                         }
                     }
-                    Text("Подход: ${selectedApproach.name}", style = MaterialTheme.typography.titleSmall)
+                    Text("Название улицы и стороны подхода", style = MaterialTheme.typography.titleSmall)
+                    OutlinedTextField(
+                        value = selectedApproach.name,
+                        onValueChange = { value ->
+                            updateIntersection(intersection.copy(approaches = intersection.approaches.map {
+                                if (it.id == selectedApproach.id) it.copy(name = value) else it
+                            }))
+                        },
+                        label = { Text("Например: проспект Ленина (север)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,

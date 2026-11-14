@@ -2,14 +2,14 @@ package ru.trafficsignalstudio.geometry
 
 import ru.trafficsignalstudio.model.CoordinationDirection
 import ru.trafficsignalstudio.model.NetworkCoordinationSettings
-import ru.trafficsignalstudio.model.NetworkTrafficLink
 import ru.trafficsignalstudio.model.RoadNetwork
+import java.util.PriorityQueue
 import kotlin.math.roundToInt
 
 /**
- * Calculates signal start offsets along configured network links.
- * The first discovered route from the reference node is used for each node;
- * disconnected nodes retain a zero offset.
+ * Calculates signal-cycle start offsets from the reference intersection.
+ * The shortest travel-time route is used when several network paths connect
+ * the same nodes. Offsets are measured modulo the common cycle length.
  */
 object NetworkCoordinationCalculator {
     fun calculateOffsets(
@@ -31,20 +31,26 @@ object NetworkCoordinationCalculator {
             }
         }.filter { it.fromIntersectionId in nodes && it.toIntersectionId in nodes }
         val outgoing = directed.groupBy { it.fromIntersectionId }
-        val offsets = mutableMapOf(root to 0)
-        val queue = ArrayDeque<String>()
-        queue.addLast(root)
+        val travelTimes = mutableMapOf(root to 0.0)
+        val queue = PriorityQueue<Pair<String, Double>>(compareBy { it.second })
+        queue.add(root to 0.0)
+
         while (queue.isNotEmpty()) {
-            val current = queue.removeFirst()
-            val currentOffset = offsets.getValue(current)
+            val (current, knownTime) = queue.remove()
+            if (knownTime > (travelTimes[current] ?: Double.POSITIVE_INFINITY) + 1e-9) continue
             outgoing[current].orEmpty().forEach { link ->
-                if (link.toIntersectionId in offsets) return@forEach
-                val travelSeconds = (link.distanceMeters / (settings.progressionSpeedKmh / 3.6)).roundToInt()
-                offsets[link.toIntersectionId] =
-                    (currentOffset + travelSeconds).mod(settings.cycleLengthSeconds)
-                queue.addLast(link.toIntersectionId)
+                val edgeTime = link.distanceMeters / (settings.progressionSpeedKmh / 3.6)
+                val candidate = knownTime + edgeTime
+                if (candidate + 1e-9 < (travelTimes[link.toIntersectionId] ?: Double.POSITIVE_INFINITY)) {
+                    travelTimes[link.toIntersectionId] = candidate
+                    queue.add(link.toIntersectionId to candidate)
+                }
             }
         }
-        return nodes.associateWith { offsets[it] ?: 0 }
+
+        return nodes.associateWith { id ->
+            val travelTime = travelTimes[id] ?: return@associateWith 0
+            travelTime.roundToInt().mod(settings.cycleLengthSeconds)
+        }
     }
 }

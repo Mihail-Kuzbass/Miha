@@ -61,6 +61,28 @@ class NetworkCoordinationCalculatorTest {
         assertEquals(10, offsets["A"])
     }
 
+
+    @Test fun shortestTravelTimePathWinsWhenSeveralRoutesExist() {
+        val multiPath = RoadNetwork(
+            intersections = listOf(node("A"), node("B"), node("C")),
+            trafficLinks = listOf(
+                NetworkTrafficLink("direct", "A", "out-A", "B", "in-B", distanceMeters = 900.0),
+                NetworkTrafficLink("first-leg", "A", "out-A2", "C", "in-C", distanceMeters = 180.0),
+                NetworkTrafficLink("second-leg", "C", "out-C", "B", "in-B2", distanceMeters = 180.0)
+            )
+        )
+        val offsets = NetworkCoordinationCalculator.calculateOffsets(
+            multiPath,
+            NetworkCoordinationSettings(
+                cycleLengthSeconds = 90,
+                progressionSpeedKmh = 36.0,
+                referenceIntersectionId = "A"
+            )
+        )
+        assertEquals(36, offsets["B"])
+        assertEquals(18, offsets["C"])
+    }
+
     @Test fun offsetsWrapAtTheCommonCycleLength() {
         val offsets = NetworkCoordinationCalculator.calculateOffsets(
             network(),

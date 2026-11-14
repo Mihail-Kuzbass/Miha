@@ -49,6 +49,7 @@ import ru.trafficsignalstudio.geometry.CrashSimulationMode
 import ru.trafficsignalstudio.geometry.ManualCrashEvent
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
 import ru.trafficsignalstudio.geometry.NetworkCoordinationCalculator
+import ru.trafficsignalstudio.geometry.SignalPlanTimingAnalyzer
 import ru.trafficsignalstudio.geometry.TrafficSimulationDemand
 import ru.trafficsignalstudio.geometry.TrafficSimulationEngine
 import ru.trafficsignalstudio.geometry.TrafficSimulationResult
@@ -217,6 +218,7 @@ fun NetworkTrafficSimulationScreen(
                     style = MaterialTheme.typography.bodySmall)
             }
         }
+        CoordinationOffsetDiagram(network, network.coordination)
 
         Text("Единая схема сети", style = MaterialTheme.typography.titleLarge)
         if (results.isEmpty()) {
@@ -523,6 +525,24 @@ private fun NetworkCoordinationDialog(
             ?: network.intersections.firstOrNull()?.id.orEmpty())
     }
     var direction by remember { mutableStateOf(current.direction) }
+    val previewCycle = cycle.toIntOrNull()?.coerceIn(30, 240) ?: current.cycleLengthSeconds
+    val previewSpeed = speed.replace(',', '.').toDoubleOrNull()
+        ?.takeIf { it.isFinite() }?.coerceIn(5.0, 120.0) ?: current.progressionSpeedKmh
+    val previewSettings = NetworkCoordinationSettings(
+        enabled = enabled,
+        cycleLengthSeconds = previewCycle,
+        progressionSpeedKmh = previewSpeed,
+        referenceIntersectionId = reference,
+        direction = direction,
+        offsetsSeconds = NetworkCoordinationCalculator.calculateOffsets(
+            network,
+            NetworkCoordinationSettings(
+                enabled = enabled, cycleLengthSeconds = previewCycle,
+                progressionSpeedKmh = previewSpeed, referenceIntersectionId = reference,
+                direction = direction
+            )
+        )
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Настройки координации") },
@@ -551,8 +571,9 @@ private fun NetworkCoordinationDialog(
                         else OutlinedButton(onClick = { direction = option }) { Text(title) }
                     }
                 }
-                Text("Смещения рассчитываются по длине связей и скорости сообщения. Для узлов без маршрута от опорного смещение будет 0 с.",
+                Text("Предварительный просмотр: шкала показывает два общих цикла. Зелёные участки — разрешающий сигнал, жёлтые — переходный интервал, красные — закрытый интервал. Сдвиг каждой строки относительно опорного узла показывает, когда начинается её цикл.",
                     style = MaterialTheme.typography.bodySmall)
+                CoordinationOffsetDiagram(network, previewSettings)
             }
         },
         confirmButton = {
@@ -571,6 +592,99 @@ private fun NetworkCoordinationDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+}
+
+@Composable
+private fun CoordinationOffsetDiagram(
+    network: RoadNetwork,
+    settings: NetworkCoordinationSettings
+) {
+    val nodes = network.intersections
+    val cycle = settings.cycleLengthSeconds.coerceIn(30, 240)
+    var previewTime by remember(nodes, settings) { mutableStateOf(0f) }
+    val reports = remember(nodes) {
+        nodes.associate { it.id to SignalPlanTimingAnalyzer.analyze(it) }
+    }
+    val rowHeight = 38
+    val chartHeight = (nodes.size.coerceAtLeast(1) * rowHeight + 30).dp
+    Text("Диаграмма сдвига циклов", style = MaterialTheme.typography.titleSmall)
+    Canvas(modifier = Modifier.fillMaxWidth().height(chartHeight).background(Color(0xFF263238))) {
+        val labelWidth = 108f
+        val rightPad = 10f
+        val chartLeft = labelWidth
+        val chartWidth = (size.width - labelWidth - rightPad).coerceAtLeast(1f)
+        val totalSeconds = cycle * 2f
+        val pxPerSecond = chartWidth / totalSeconds
+        val top = 22f
+        val axisPaint = AndroidPaint().apply {
+            color = android.graphics.Color.LTGRAY
+            textSize = 10f
+            isAntiAlias = true
+        }
+        val labelPaint = AndroidPaint().apply {
+            color = android.graphics.Color.WHITE
+            textSize = 11f
+            isAntiAlias = true
+        }
+        for (tick in 0..8) {
+            val second = totalSeconds * tick / 8f
+            val x = chartLeft + second * pxPerSecond
+            drawLine(Color(0xFF455A64), Offset(x, top - 10f), Offset(x, size.height - 5f), 1f)
+            drawContext.canvas.nativeCanvas.drawText(second.toInt().toString(), x - 7f, 13f, axisPaint)
+        }
+        drawLine(Color(0xFF90A4AE), Offset(chartLeft, top - 10f),
+            Offset(chartLeft + chartWidth, top - 10f), 1f)
+        nodes.forEachIndexed { index, node ->
+            val y = top + index * rowHeight
+            drawContext.canvas.nativeCanvas.drawText(node.name.take(15), 6f, y + 14f, labelPaint)
+            val offset = (settings.offsetsSeconds[node.id] ?: 0).mod(cycle)
+            drawContext.canvas.nativeCanvas.drawText("+${offset}с", 6f, y + 27f, axisPaint)
+            drawRect(Color(0xFF37474F), Offset(chartLeft, y),
+                androidx.compose.ui.geometry.Size(chartWidth, 24f))
+            val report = reports[node.id]
+            val originalCycle = report?.cycleLengthSeconds ?: 0
+            if (report != null && report.isValid && originalCycle > 0) {
+                val scale = cycle.toFloat() / originalCycle.toFloat()
+                for (repeat in -1..2) {
+                    report.phaseWindows.forEach { window ->
+                        val phaseStart = offset + repeat * cycle + window.startSeconds * scale
+                        val greenEnd = offset + repeat * cycle + window.flashingGreenEndSeconds * scale
+                        val yellowEnd = offset + repeat * cycle + window.yellowEndSeconds * scale
+                        val redEnd = offset + repeat * cycle + window.allRedEndSeconds * scale
+                        fun segment(start: Float, end: Float, color: Color) {
+                            val clippedStart = start.coerceAtLeast(0f)
+                            val clippedEnd = end.coerceAtMost(totalSeconds)
+                            if (clippedEnd > clippedStart) {
+                                drawRect(color,
+                                    Offset(chartLeft + clippedStart * pxPerSecond, y + 3f),
+                                    androidx.compose.ui.geometry.Size((clippedEnd - clippedStart) * pxPerSecond, 18f))
+                            }
+                        }
+                        segment(phaseStart, greenEnd, Color(0xFF43A047))
+                        segment(greenEnd, yellowEnd, Color(0xFFFFC107))
+                        segment(yellowEnd, redEnd, Color(0xFFE53935))
+                    }
+                }
+            } else {
+                drawContext.canvas.nativeCanvas.drawText("нет корректного плана", chartLeft + 6f, y + 16f, axisPaint)
+            }
+        }
+        val cursorX = chartLeft + previewTime.coerceIn(0f, totalSeconds) * pxPerSecond
+        drawLine(Color.White, Offset(cursorX, top - 10f), Offset(cursorX, size.height - 4f), 2f)
+    }
+    Text("Модельное время: ${previewTime.toInt()} с · курсор можно перемещать по шкале",
+        style = MaterialTheme.typography.bodySmall)
+    Slider(
+        value = previewTime,
+        onValueChange = { previewTime = it },
+        valueRange = 0f..(cycle * 2f),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("■ Зелёный", color = Color(0xFF43A047), style = MaterialTheme.typography.labelSmall)
+        Text("■ Жёлтый", color = Color(0xFFFFC107), style = MaterialTheme.typography.labelSmall)
+        Text("■ Красный", color = Color(0xFFE53935), style = MaterialTheme.typography.labelSmall)
+    }
 }
 
 @Composable
