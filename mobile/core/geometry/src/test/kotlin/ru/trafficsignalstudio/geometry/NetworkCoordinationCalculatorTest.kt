@@ -20,7 +20,7 @@ class NetworkCoordinationCalculatorTest {
         name = id,
         type = IntersectionType.FOUR_LEG,
         approaches = emptyList(),
-        laneConnections = movements.mapIndexed { index, movement ->
+        laneConnections = (movements.toList() + "other-$id").mapIndexed { index, movement ->
             LaneConnection(
                 id = movement,
                 fromApproachId = "from-$index",
@@ -76,7 +76,7 @@ class NetworkCoordinationCalculatorTest {
         ))
         assertTrue(report.isValid)
         assertEquals(0, report.offsetsSeconds["B"])
-        assertEquals(40, report.offsetsSeconds["A"])
+        assertEquals(10, report.offsetsSeconds["A"])
         assertEquals("B", report.links.single().fromIntersectionId)
         assertEquals("A", report.links.single().toIntersectionId)
     }
