@@ -57,8 +57,7 @@ object NetworkLinkTrafficModel {
         val positionMeters: Double,
         val speedMetersPerSecond: Double,
         val lengthMeters: Double,
-        val widthMeters: Double,
-        val queuedAtEntry: Boolean
+        val widthMeters: Double
     )
 
     data class Result(
@@ -83,19 +82,17 @@ object NetworkLinkTrafficModel {
         if (timeSeconds < schedule.entryTimeSeconds || timeSeconds >= schedule.arrivalTimeSeconds) {
             return@mapNotNull null
         }
-        val queued = false
         val elapsed = (timeSeconds - schedule.entryTimeSeconds).coerceAtLeast(0.0)
         val acceleration = schedule.accelerationMetersPerSecondSquared
         val accelTime = schedule.cruiseSpeedMetersPerSecond / acceleration
         val accelDistance = 0.5 * acceleration * accelTime * accelTime
-        val rawPosition = if (queued) 0.0 else if (elapsed < accelTime) {
+        val rawPosition = if (elapsed < accelTime) {
             0.5 * acceleration * elapsed * elapsed
         } else {
             accelDistance + schedule.cruiseSpeedMetersPerSecond * (elapsed - accelTime)
         }
         val position = rawPosition.coerceIn(0.0, schedule.distanceMeters)
-        val speed = if (queued) 0.0 else
-            min(schedule.cruiseSpeedMetersPerSecond, acceleration * elapsed)
+        val speed = min(schedule.cruiseSpeedMetersPerSecond, acceleration * elapsed)
         VehicleSnapshot(
             linkId = schedule.linkId,
             vehicleId = schedule.vehicleId,
@@ -104,8 +101,7 @@ object NetworkLinkTrafficModel {
             positionMeters = position,
             speedMetersPerSecond = speed,
             lengthMeters = schedule.lengthMeters,
-            widthMeters = schedule.widthMeters,
-            queuedAtEntry = queued
+            widthMeters = schedule.widthMeters
         )
     }
 
