@@ -122,6 +122,15 @@ object NetworkCoordinationCalculator {
                 }
                 return@forEach
             }
+            val nonStandardYellow = plan.phases.firstOrNull { it.yellowSeconds != 3 }
+            if (nonStandardYellow != null) {
+                diagnostics += CoordinationDiagnostic(
+                    CoordinationIssueCode.INVALID_SIGNAL_PLAN,
+                    "Фаза «${nonStandardYellow.name}» объекта «${node.name}»: жёлтый сигнал должен длиться 3 с согласно п. 7.5.2 ГОСТ Р 52289-2019.",
+                    intersectionId = node.id
+                )
+                return@forEach
+            }
             val timing = SignalPlanTimingAnalyzer.analyze(node)
             if (!timing.isValid || timing.cycleLengthSeconds <= 0) {
                 diagnostics += CoordinationDiagnostic(
