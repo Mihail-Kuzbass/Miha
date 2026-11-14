@@ -257,7 +257,7 @@ object NetworkLinkTrafficModel {
                     queueLength = (queueLength + lengthDelta).coerceAtLeast(0.0)
                     maximumQueue = max(maximumQueue, queue)
                     maximumQueueLength = max(maximumQueueLength, queueLength)
-                    if (delta > 0 && queueLength > link.distanceMeters * link.laneCount) spillbackVehicles++
+                    if (delta > 0 && queueLength > link.queueStorageLengthMeters * link.laneCount) spillbackVehicles++
                 }
             metrics += LinkMetrics(
                 linkId = link.id,
