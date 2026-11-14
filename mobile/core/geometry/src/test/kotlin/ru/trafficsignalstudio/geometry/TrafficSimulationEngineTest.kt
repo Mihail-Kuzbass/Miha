@@ -179,7 +179,10 @@ class TrafficSimulationEngineTest {
             movements = connections.map { MovementTrafficDemand(it.id, 60.0) },
             durationSeconds = 180,
             approachStorageLengthMeters = 40.0,
-            approachSpeedKmh = 50.0
+            approachSpeedKmh = 50.0,
+            // Isolate collision avoidance from the separate random crash-scenario generator.
+            // EXPERIMENTAL with no manual events still detects and records physical contact.
+            crashMode = CrashSimulationMode.EXPERIMENTAL
         ))
         assertFalse(
             "Predictive braking should prevent physical contact between conflicting moving streams",
