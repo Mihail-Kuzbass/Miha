@@ -644,10 +644,12 @@ private fun NetworkLinkTrafficDiagram(
         }
         vehicles.forEach { vehicle ->
             val lane = vehicle.laneIndex.coerceIn(0, link.laneCount - 1)
-            val vehicleWidth = (vehicle.lengthMeters / link.distanceMeters * size.width)
-                .coerceIn(7f, 24f)
+            val vehicleWidth = (
+                vehicle.lengthMeters / link.distanceMeters * size.width.toDouble()
+            ).toFloat().coerceIn(7f, 24f)
             // positionMeters is the front-bumper coordinate; draw the body behind it.
-            val x = (vehicle.positionMeters / link.distanceMeters * size.width - vehicleWidth)
+            val frontX = (vehicle.positionMeters / link.distanceMeters * size.width.toDouble()).toFloat()
+            val x = (frontX - vehicleWidth)
                 .coerceIn(-vehicleWidth, (size.width - vehicleWidth).coerceAtLeast(0f))
             val y = lane * laneHeight + laneHeight * 0.2f
             val color = when (vehicle.vehicleClass) {
