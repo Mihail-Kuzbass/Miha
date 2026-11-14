@@ -57,6 +57,9 @@ class NetworkTrafficNetworkSolverTest {
         assertTrue("At least one circulation hop must be propagated", result.propagationIterations >= 3)
         assertEquals(2, result.nodeResults.getValue("A").size)
         assertEquals(2, result.nodeResults.getValue("B").size)
+        val returnedVehicleId = result.nodeResults.getValue("A")
+            .map { it.vehicleId }.first { it >= NETWORK_VEHICLE_ID_BASE }
+        assertTrue(result.nodeResults.getValue("B").all { it.vehicleId == returnedVehicleId })
     }
 
     @Test fun roadLinkEntryQueueUsesVehicleHeadwayAndParallelLanes() {
