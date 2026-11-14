@@ -26,6 +26,16 @@ class SignalPlanTimingAnalyzerTest {
         assertTrue(report.diagnostics.any { it.code == SignalPlanIssueCode.UNKNOWN_CONNECTION })
     }
 
+    @Test fun rejectsRedYellowLongerThanTwoSeconds() {
+        val report = SignalPlanTimingAnalyzer.analyze(intersection(SignalPlan(phases = listOf(
+            SignalPhase(id = "p1", name = "Переход", greenConnectionIds = setOf("move"),
+                redYellowSeconds = 3, greenSeconds = 20, flashingGreenSeconds = 0,
+                yellowSeconds = 3, allRedSeconds = 2)
+        ))))
+        assertFalse(report.isValid)
+        assertTrue(report.diagnostics.any { it.code == SignalPlanIssueCode.INVALID_RED_YELLOW_DURATION })
+    }
+
     @Test fun reportsEmptyPhasesAndUnassignedMovements() {
         val report = SignalPlanTimingAnalyzer.analyze(intersection(SignalPlan(phases = listOf(
             SignalPhase(id = "p1", name = "Пустая", greenConnectionIds = emptySet())
