@@ -61,6 +61,7 @@ import ru.trafficsignalstudio.model.CoordinationDirection
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.NetworkCoordinationSettings
 import ru.trafficsignalstudio.model.NetworkTrafficLink
+import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.ProjectDocument
 import ru.trafficsignalstudio.model.RoadNetwork
 import kotlin.math.hypot
@@ -546,6 +547,9 @@ private fun NetworkLinkDialog(
     var travelSpeed by remember { mutableStateOf("30") }
     var laneCount by remember { mutableStateOf("1") }
     var queueStorage by remember { mutableStateOf("120") }
+    var laneWidth by remember { mutableStateOf("3.5") }
+    var centerlineText by remember { mutableStateOf("") }
+    var laneChangesEnabled by remember { mutableStateOf(true) }
     var validationError by remember { mutableStateOf<String?>(null) }
     val source = intersections.firstOrNull { it.id == fromNode }
     val target = intersections.firstOrNull { it.id == toNode }
@@ -591,6 +595,19 @@ private fun NetworkLinkDialog(
                     label = { Text("Количество полос на участке (1–8)") }, singleLine = true)
                 OutlinedTextField(value = queueStorage, onValueChange = { queueStorage = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
                     label = { Text("Длина хранения очереди на участке, м") }, singleLine = true)
+                OutlinedTextField(value = laneWidth, onValueChange = { laneWidth = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                    label = { Text("Ширина полосы, м") }, singleLine = true)
+                OutlinedTextField(
+                    value = centerlineText,
+                    onValueChange = { centerlineText = it },
+                    label = { Text("Геометрия: x,y; x,y; x,y (метры)") },
+                    supportingText = { Text("Оставьте пустым для прямой дороги. Не менее двух точек для кривой.") },
+                    minLines = 2
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Разрешить динамические перестроения")
+                    Switch(checked = laneChangesEnabled, onCheckedChange = { laneChangesEnabled = it })
+                }
                 validationError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
@@ -601,18 +618,35 @@ private fun NetworkLinkDialog(
                 val speedValue = travelSpeed.replace(',', '.').toDoubleOrNull()
                 val laneValue = laneCount.toIntOrNull()
                 val queueStorageValue = queueStorage.replace(',', '.').toDoubleOrNull()
+                val laneWidthValue = laneWidth.replace(',', '.').toDoubleOrNull()
+                val centerlinePoints = runCatching {
+                    if (centerlineText.isBlank()) emptyList() else centerlineText.split(';').map { token ->
+                        val coordinates = token.trim().split(',')
+                        require(coordinates.size == 2)
+                        Point2D(
+                            coordinates[0].trim().replace(',', '.').toDouble(),
+                            coordinates[1].trim().replace(',', '.').toDouble()
+                        )
+                    }
+                }.getOrNull()
                 if (source != null && target != null && source.id != target.id &&
                     fromMovement.isNotBlank() && toMovement.isNotBlank() &&
                     shareValue != null && shareValue > 0.0 && shareValue <= availableSharePercent + 1e-6 &&
                     distanceValue != null && distanceValue in 1.0..100000.0 &&
                     speedValue != null && speedValue in 5.0..120.0 && laneValue != null && laneValue in 1..8 &&
-                    queueStorageValue != null && queueStorageValue in 1.0..5000.0) {
+                    queueStorageValue != null && queueStorageValue in 1.0..5000.0 &&
+                    laneWidthValue != null && laneWidthValue in 2.5..5.0 &&
+                    centerlinePoints != null && (centerlinePoints.isEmpty() || centerlinePoints.size >= 2) &&
+                    centerlinePoints.all { it.xMeters.isFinite() && it.yMeters.isFinite() }) {
                     onAdd(NetworkTrafficLink(
                         fromIntersectionId = fromNode, fromMovementConnectionId = fromMovement,
                         toIntersectionId = toNode, toMovementConnectionId = toMovement,
                         flowSharePercent = shareValue, distanceMeters = distanceValue,
                         travelSpeedKmh = speedValue, laneCount = laneValue,
-                        queueStorageLengthMeters = queueStorageValue
+                        queueStorageLengthMeters = queueStorageValue,
+                        laneWidthMeters = laneWidthValue,
+                        centerline = centerlinePoints,
+                        laneChangesEnabled = laneChangesEnabled
                     ))
                 } else {
                     validationError = if (shareValue != null && shareValue > availableSharePercent + 1e-6)
@@ -630,28 +664,41 @@ private fun NetworkLinkTrafficDiagram(
     link: NetworkTrafficLink,
     vehicles: List<NetworkLinkTrafficModel.VehicleSnapshot>
 ) {
-    Canvas(modifier = Modifier.fillMaxWidth().height((link.laneCount * 24 + 8).dp)) {
-        val laneHeight = size.height / link.laneCount
-        drawRect(color = Color(0xFF42464D), size = size)
-        for (lane in 1 until link.laneCount) {
-            val y = lane * laneHeight
-            drawLine(
-                color = Color.White.copy(alpha = 0.65f),
-                start = Offset(0f, y),
-                end = Offset(size.width, y),
-                strokeWidth = 1.5f
-            )
+    Canvas(modifier = Modifier.fillMaxWidth().height(150.dp)) {
+        val centerline = link.centerline.ifEmpty {
+            listOf(Point2D(0.0, 0.0), Point2D(link.distanceMeters, 0.0))
         }
+        val laneMargin = link.laneCount * link.laneWidthMeters / 2.0 + 4.0
+        val minX = centerline.minOf { it.xMeters } - laneMargin
+        val maxX = centerline.maxOf { it.xMeters } + laneMargin
+        val minY = centerline.minOf { it.yMeters } - laneMargin
+        val maxY = centerline.maxOf { it.yMeters } + laneMargin
+        val worldWidth = (maxX - minX).coerceAtLeast(1.0)
+        val worldHeight = (maxY - minY).coerceAtLeast(1.0)
+        val scale = min(size.width / worldWidth.toFloat(), size.height / worldHeight.toFloat())
+        val offsetX = (size.width - worldWidth.toFloat() * scale) / 2f
+        val offsetY = (size.height - worldHeight.toFloat() * scale) / 2f
+        fun mapPoint(point: Point2D): Offset = Offset(
+            offsetX + ((point.xMeters - minX).toFloat() * scale),
+            size.height - offsetY - ((point.yMeters - minY).toFloat() * scale)
+        )
+        val roadPath = Path().apply {
+            val first = mapPoint(centerline.first())
+            moveTo(first.x, first.y)
+            centerline.drop(1).forEach { point ->
+                val mapped = mapPoint(point)
+                lineTo(mapped.x, mapped.y)
+            }
+        }
+        drawPath(
+            path = roadPath,
+            color = Color(0xFF42464D),
+            style = Stroke(width = (link.laneCount * 13f).coerceAtLeast(16f))
+        )
+        drawPath(path = roadPath, color = Color.White.copy(alpha = 0.55f),
+            style = Stroke(width = 1.2f))
         vehicles.forEach { vehicle ->
-            val lane = vehicle.laneIndex.coerceIn(0, link.laneCount - 1)
-            val vehicleWidth = (
-                vehicle.lengthMeters / link.distanceMeters * size.width.toDouble()
-            ).toFloat().coerceIn(7f, 24f)
-            // positionMeters is the front-bumper coordinate; draw the body behind it.
-            val frontX = (vehicle.positionMeters / link.distanceMeters * size.width.toDouble()).toFloat()
-            val x = (frontX - vehicleWidth)
-                .coerceIn(-vehicleWidth, (size.width - vehicleWidth).coerceAtLeast(0f))
-            val y = lane * laneHeight + laneHeight * 0.2f
+            val center = mapPoint(vehicle.worldPoint)
             val color = when (vehicle.vehicleClass) {
                 ru.trafficsignalstudio.model.VehicleClass.CITY_BUS,
                 ru.trafficsignalstudio.model.VehicleClass.ARTICULATED_BUS,
@@ -661,12 +708,12 @@ private fun NetworkLinkTrafficDiagram(
                 ru.trafficsignalstudio.model.VehicleClass.ARTICULATED_TRUCK -> Color(0xFFE6A23C)
                 else -> Color(0xFF90CAF9)
             }
-            drawRoundRect(
-                color = color,
-                topLeft = Offset(x, y),
-                size = androidx.compose.ui.geometry.Size(vehicleWidth, laneHeight * 0.6f),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+            drawCircle(color = color, radius = 5.5f, center = center)
+            val headingEnd = Offset(
+                center.x + kotlin.math.cos(vehicle.headingRadians).toFloat() * 9f,
+                center.y - kotlin.math.sin(vehicle.headingRadians).toFloat() * 9f
             )
+            drawLine(color = Color.White, start = center, end = headingEnd, strokeWidth = 2f)
         }
     }
 }
