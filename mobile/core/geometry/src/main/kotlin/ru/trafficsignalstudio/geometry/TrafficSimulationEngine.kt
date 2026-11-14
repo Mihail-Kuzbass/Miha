@@ -1348,12 +1348,6 @@ object TrafficSimulationEngine {
                         val fraction = (0.0 - oldPosition) / (nextPosition - oldPosition).coerceAtLeast(1e-9)
                         val crossingTime = time + fraction.coerceIn(0.0, 1.0) * step
                         vehicle.crossingTimeSeconds = crossingTime
-                        departureEvents += VehicleDepartureEvent(
-                            timeSeconds = crossingTime,
-                            connectionId = vehicle.waiting.demandConnectionId,
-                            vehicleClass = vehicle.waiting.vehicleClass,
-                            vehicleId = vehicle.waiting.id
-                        )
                         (states[vehicle.waiting.demandConnectionId] ?: state).departures++
                         totalDepartures++
                         categoryDepartures[vehicle.waiting.vehicleClass] =
@@ -1378,7 +1372,20 @@ object TrafficSimulationEngine {
             // Remove vehicles only after their rear bumper has cleared the path.
             states.values.forEach { state ->
                 state.vehicles.removeAll { vehicle ->
-                    vehicle.positionMeters - vehicle.waiting.model.lengthMeters > state.pathLengthMeters
+                    val hasClearedIntersection =
+                        vehicle.positionMeters - vehicle.waiting.model.lengthMeters > state.pathLengthMeters
+                    if (hasClearedIntersection) {
+                        // Transfer only after the vehicle's rear bumper has cleared
+                        // the full movement trajectory, not when its front crosses
+                        // the upstream stop line.
+                        departureEvents += VehicleDepartureEvent(
+                            timeSeconds = time,
+                            connectionId = vehicle.waiting.demandConnectionId,
+                            vehicleClass = vehicle.waiting.vehicleClass,
+                            vehicleId = vehicle.waiting.id
+                        )
+                    }
+                    hasClearedIntersection
                 }
             }
 
