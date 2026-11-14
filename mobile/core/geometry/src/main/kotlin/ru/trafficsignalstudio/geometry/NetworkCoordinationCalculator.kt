@@ -151,7 +151,7 @@ object NetworkCoordinationCalculator {
             timing.phaseWindows.forEach { phaseWindow ->
                 val phase = plan.phases.firstOrNull { it.id == phaseWindow.phaseId } ?: return@forEach
                 phase.greenConnectionIds.forEach { movementId ->
-                    greenByMovement[movementId] = GreenWindow(phaseWindow.startSeconds, phaseWindow.greenEndSeconds)
+                    greenByMovement[movementId] = GreenWindow(phaseWindow.startSeconds, phaseWindow.flashingGreenEndSeconds)
                 }
             }
             windowsByNode[node.id] = greenByMovement
