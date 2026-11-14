@@ -479,7 +479,7 @@ fun NetworkTrafficSimulationScreen(
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text("$fromName → $toName", style = MaterialTheme.typography.titleSmall)
-                            Text("Полос: $link.laneCount · вошло: $metric.vehiclesEntered · прибыло за период: $metric.vehiclesArrivedWithinHorizon")
+                            Text("Полос: $link.laneCount · въехало: $metric.vehiclesEntered · ожидает въезда к концу: $metric.vehiclesWaitingAtEnd · прибыло: $metric.vehiclesArrivedWithinHorizon")
                             Text("Макс. очередь на въезде: $metric.maximumEntryQueue авт. · средняя задержка: %.1f с · макс.: %.1f с".format(
                                 metric.averageEntryDelaySeconds, metric.maximumEntryDelaySeconds))
                             Text("Макс. длина очереди: %.1f м · вышло за вместимость участка: %d авт.".format(
