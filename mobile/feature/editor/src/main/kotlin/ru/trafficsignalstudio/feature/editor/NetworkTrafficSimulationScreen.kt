@@ -736,21 +736,17 @@ private fun NetworkCoordinationDialog(
     val previewCycle = cycle.toIntOrNull()?.coerceIn(30, 240) ?: current.cycleLengthSeconds
     val previewSpeed = speed.replace(',', '.').toDoubleOrNull()
         ?.takeIf { it.isFinite() }?.coerceIn(5.0, 120.0) ?: current.progressionSpeedKmh
-    val previewSettings = NetworkCoordinationSettings(
+    val previewBaseSettings = NetworkCoordinationSettings(
         enabled = enabled,
         cycleLengthSeconds = previewCycle,
         progressionSpeedKmh = previewSpeed,
         referenceIntersectionId = reference,
-        direction = direction,
-        offsetsSeconds = NetworkCoordinationCalculator.calculateOffsets(
-            network,
-            NetworkCoordinationSettings(
-                enabled = enabled, cycleLengthSeconds = previewCycle,
-                progressionSpeedKmh = previewSpeed, referenceIntersectionId = reference,
-                direction = direction
-            )
-        )
+        direction = direction
     )
+    val previewReport = remember(network, previewBaseSettings) {
+        NetworkCoordinationCalculator.calculateReport(network, previewBaseSettings)
+    }
+    val previewSettings = previewBaseSettings.copy(offsetsSeconds = previewReport.offsetsSeconds)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Настройки координации") },
@@ -764,7 +760,9 @@ private fun NetworkCoordinationDialog(
                 OutlinedTextField(value = cycle, onValueChange = { cycle = it.filter(Char::isDigit) },
                     label = { Text("Общий цикл, с (30–240)") }, singleLine = true)
                 OutlinedTextField(value = speed, onValueChange = { speed = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                    label = { Text("Скорость сообщения, км/ч") }, singleLine = true)
+                    label = { Text("Целевая скорость координации, км/ч") },
+                    supportingText = { Text("Для каждого участка расчётная скорость ограничивается его заданной скоростью движения.") },
+                    singleLine = true)
                 NetworkDropdown("Опорный перекрёсток", network.intersections.map { NetworkChoice(it.id, it.name) },
                     reference) { reference = it }
                 Text("Направление координации", style = MaterialTheme.typography.titleSmall)
@@ -779,13 +777,31 @@ private fun NetworkCoordinationDialog(
                         else OutlinedButton(onClick = { direction = option }) { Text(title) }
                     }
                 }
-                Text("Предварительный просмотр: шкала показывает два общих цикла. Зелёные участки — разрешающий сигнал, жёлтые — переходный интервал, красные — закрытый интервал. Сдвиг каждой строки относительно опорного узла показывает, когда начинается её цикл.",
+                Text("Расчёт использует фактические зелёные окна фаз и время проезда по каждой связи. Жёлтый и общий красный интервалы не включаются в полосу пропуска. Фазы не растягиваются и не сжимаются под общий цикл.",
                     style = MaterialTheme.typography.bodySmall)
+                Text(
+                    if (previewReport.isValid) "Расчёт выполнен · суммарная взвешенная полоса пропуска: ${"%.1f".format(previewReport.objectiveBandwidthSeconds)} с"
+                    else "Координация не может быть подтверждена: устраните нормативные и расчётные замечания ниже.",
+                    color = if (previewReport.isValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                previewReport.links.forEach { linkResult ->
+                    val fromName = network.intersections.firstOrNull { it.id == linkResult.fromIntersectionId }?.name ?: linkResult.fromIntersectionId
+                    val toName = network.intersections.firstOrNull { it.id == linkResult.toIntersectionId }?.name ?: linkResult.toIntersectionId
+                    Text(
+                        "$fromName → $toName: проезд ${"%.1f".format(linkResult.travelTimeSeconds)} с · полоса пропуска ${"%.1f".format(linkResult.progressionBandwidthSeconds)} с",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                previewReport.diagnostics.forEach { diagnostic ->
+                    Text("• ${diagnostic.message}", color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall)
+                }
                 CoordinationOffsetDiagram(network, previewSettings)
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            TextButton(enabled = !enabled || previewReport.isValid, onClick = {
                 val cycleValue = cycle.toIntOrNull()
                 val speedValue = speed.replace(',', '.').toDoubleOrNull()
                 if (cycleValue != null && cycleValue in 30..240 && speedValue != null &&
@@ -852,13 +868,13 @@ private fun CoordinationOffsetDiagram(
             val report = reports[node.id]
             val originalCycle = report?.cycleLengthSeconds ?: 0
             if (report != null && report.isValid && originalCycle > 0) {
-                val scale = cycle.toFloat() / originalCycle.toFloat()
+                if (originalCycle == cycle) {
                 for (repeat in -1..2) {
                     report.phaseWindows.forEach { window ->
-                        val phaseStart = offset + repeat * cycle + window.startSeconds * scale
-                        val greenEnd = offset + repeat * cycle + window.flashingGreenEndSeconds * scale
-                        val yellowEnd = offset + repeat * cycle + window.yellowEndSeconds * scale
-                        val redEnd = offset + repeat * cycle + window.allRedEndSeconds * scale
+                        val phaseStart = offset + repeat * cycle + window.startSeconds
+                        val greenEnd = offset + repeat * cycle + window.flashingGreenEndSeconds
+                        val yellowEnd = offset + repeat * cycle + window.yellowEndSeconds
+                        val redEnd = offset + repeat * cycle + window.allRedEndSeconds
                         fun segment(start: Float, end: Float, color: Color) {
                             val clippedStart = start.coerceAtLeast(0f)
                             val clippedEnd = end.coerceAtMost(totalSeconds)
@@ -872,6 +888,9 @@ private fun CoordinationOffsetDiagram(
                         segment(greenEnd, yellowEnd, Color(0xFFFFC107))
                         segment(yellowEnd, redEnd, Color(0xFFE53935))
                     }
+                }
+                } else {
+                    drawContext.canvas.nativeCanvas.drawText("цикл ${originalCycle} с ≠ ${cycle} с", chartLeft + 6f, y + 16f, axisPaint)
                 }
             } else {
                 drawContext.canvas.nativeCanvas.drawText("нет корректного плана", chartLeft + 6f, y + 16f, axisPaint)
