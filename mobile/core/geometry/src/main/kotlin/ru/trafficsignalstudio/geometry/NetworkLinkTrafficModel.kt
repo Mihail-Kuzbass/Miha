@@ -63,11 +63,11 @@ object NetworkLinkTrafficModel {
                 departuresByIntersection[source.first].orEmpty()
                     .asSequence()
                     .filter { it.connectionId == source.second }
-                    .forEach { departure ->
+                    .forEach departureLoop@{ departure ->
                         // Deterministic partition: every vehicle is assigned to at most one link.
                         val bucket = Math.floorMod(departure.vehicleId * 7919L, 10000L) / 100.0
                         val selected = cumulative.firstOrNull { bucket < it.second }?.first
-                            ?: return@forEach
+                            ?: return@departureLoop
                         candidatesByLink.getOrPut(selected.id) { mutableListOf() }
                             .add(Candidate(selected, departure))
                     }
