@@ -10,7 +10,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.hypot
-import kotlin.math.min
 
 enum class CoordinationIssueCode {
     NO_REFERENCE, MISSING_SIGNAL_PLAN, INVALID_SIGNAL_PLAN, CYCLE_MISMATCH,
