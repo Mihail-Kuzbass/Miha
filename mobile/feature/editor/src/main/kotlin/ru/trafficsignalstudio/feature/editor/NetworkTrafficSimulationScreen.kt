@@ -326,7 +326,7 @@ fun NetworkTrafficSimulationScreen(
                             Text("${from?.name ?: "Удалённый узел"} → ${to?.name ?: "Удалённый узел"}")
                             Text("${movementLabelsByIntersection[link.fromIntersectionId]?.get(link.fromMovementConnectionId) ?: "Исходная траектория не найдена"} → ${movementLabelsByIntersection[link.toIntersectionId]?.get(link.toMovementConnectionId) ?: "Конечная траектория не найдена"}",
                                 style = MaterialTheme.typography.bodySmall)
-                            Text("${link.flowSharePercent.toInt()}% потока · ${link.distanceMeters.toInt()} м · ${link.travelSpeedKmh.toInt()} км/ч · полос: ${link.laneCount}",
+                            Text("${link.flowSharePercent.toInt()}% потока · ${link.distanceMeters.toInt()} м · ${link.travelSpeedKmh.toInt()} км/ч · полос: ${link.laneCount} · ${if (link.centerline.isEmpty()) "прямая геометрия" else "кривая: ${link.centerline.size} точек"} · перестроения: ${if (link.laneChangesEnabled) "вкл." else "выкл."}",
                                 style = MaterialTheme.typography.labelSmall)
                         }
                         TextButton(onClick = {
