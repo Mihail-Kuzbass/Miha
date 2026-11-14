@@ -24,6 +24,7 @@ object NetworkLinkTrafficModel {
     data class LinkMetrics(
         val linkId: String,
         val vehiclesEntered: Int,
+        val vehiclesWaitingAtEnd: Int,
         val vehiclesArrivedWithinHorizon: Int,
         val maximumEntryQueue: Int,
         val averageEntryDelaySeconds: Double,
@@ -259,7 +260,10 @@ object NetworkLinkTrafficModel {
                 }
             metrics += LinkMetrics(
                 linkId = link.id,
-                vehiclesEntered = candidates.size,
+                vehiclesEntered = schedules.count { it.entryTimeSeconds <= durationSeconds },
+                vehiclesWaitingAtEnd = schedules.count {
+                    it.departureTimeSeconds <= durationSeconds && it.entryTimeSeconds > durationSeconds
+                },
                 vehiclesArrivedWithinHorizon = arrivedWithinHorizon,
                 maximumEntryQueue = maximumQueue,
                 averageEntryDelaySeconds = entryDelays.average().takeIf { it.isFinite() } ?: 0.0,
