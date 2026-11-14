@@ -201,6 +201,34 @@ class NetworkTrafficNetworkSolverTest {
         assertTrue(arrivals[1].timeSeconds - arrivals[0].timeSeconds > 2.0)
     }
 
+    @Test fun vehicleSnapshotsFollowCurvedRoadGeometry() {
+        val link = NetworkTrafficLink(
+            id = "curved",
+            fromIntersectionId = "A",
+            fromMovementConnectionId = "out",
+            toIntersectionId = "B",
+            toMovementConnectionId = "in",
+            distanceMeters = 100.0,
+            travelSpeedKmh = 36.0,
+            centerline = listOf(
+                ru.trafficsignalstudio.model.Point2D(0.0, 0.0),
+                ru.trafficsignalstudio.model.Point2D(50.0, 0.0),
+                ru.trafficsignalstudio.model.Point2D(50.0, 50.0)
+            )
+        )
+        val result = NetworkLinkTrafficModel.route(
+            mapOf("A" to listOf(
+                VehicleDepartureEvent(0.0, "out", VehicleClass.PASSENGER_CAR, 7L)
+            )),
+            listOf(link),
+            60
+        )
+        val vehicle = result.vehiclesAt(8.0).single()
+        assertEquals(50.0, vehicle.worldPoint.xMeters, 0.01)
+        assertTrue(vehicle.worldPoint.yMeters > 0.0)
+        assertEquals(Math.PI / 2.0, vehicle.headingRadians, 0.01)
+    }
+
     @Test fun splitLinksAssignEachVehicleToAtMostOneOutgoingLink() {
         val links = listOf(
             NetworkTrafficLink(
