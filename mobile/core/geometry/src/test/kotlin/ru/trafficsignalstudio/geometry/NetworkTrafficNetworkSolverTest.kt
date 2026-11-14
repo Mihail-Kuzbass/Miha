@@ -91,6 +91,54 @@ class NetworkTrafficNetworkSolverTest {
         assertEquals(0, twoLaneResult.metrics.single().maximumEntryQueue)
     }
 
+    @Test fun linkSnapshotsExposeAcceleratingAndQueuedVehicles() {
+        val link = NetworkTrafficLink(
+            id = "live-link",
+            fromIntersectionId = "A",
+            fromMovementConnectionId = "out",
+            toIntersectionId = "B",
+            toMovementConnectionId = "in",
+            distanceMeters = 100.0,
+            travelSpeedKmh = 36.0
+        )
+        val result = NetworkLinkTrafficModel.route(
+            mapOf("A" to listOf(
+                VehicleDepartureEvent(0.0, "out", VehicleClass.PASSENGER_CAR, 1L),
+                VehicleDepartureEvent(0.0, "out", VehicleClass.PASSENGER_CAR, 2L)
+            )),
+            listOf(link),
+            60
+        )
+        val atOneSecond = result.vehiclesAt(1.0)
+        assertEquals(2, atOneSecond.size)
+        assertTrue(atOneSecond.any { it.queuedAtEntry })
+        val moving = atOneSecond.first { !it.queuedAtEntry }
+        assertEquals(2.0, moving.speedMetersPerSecond, 0.001)
+        assertEquals(1.0, moving.positionMeters, 0.001)
+    }
+
+    @Test fun queueLengthBeyondRoadStorageIsReportedAsSpillback() {
+        val link = NetworkTrafficLink(
+            id = "short-link",
+            fromIntersectionId = "A",
+            fromMovementConnectionId = "out",
+            toIntersectionId = "B",
+            toMovementConnectionId = "in",
+            distanceMeters = 1.0,
+            travelSpeedKmh = 36.0
+        )
+        val result = NetworkLinkTrafficModel.route(
+            mapOf("A" to listOf(
+                VehicleDepartureEvent(0.0, "out", VehicleClass.PASSENGER_CAR, 1L),
+                VehicleDepartureEvent(0.0, "out", VehicleClass.PASSENGER_CAR, 2L)
+            )),
+            listOf(link),
+            60
+        )
+        assertTrue(result.metrics.single().maximumEntryQueueLengthMeters > link.distanceMeters)
+        assertEquals(1, result.metrics.single().spillbackVehicles)
+    }
+
     @Test fun vehicleClassChangesRoadLinkSafeHeadway() {
         val link = NetworkTrafficLink(
             id = "bus-link",
