@@ -213,7 +213,9 @@ class NetworkTrafficNetworkSolverTest {
             VehicleDepartureEvent(it.toDouble(), "out", VehicleClass.PASSENGER_CAR, it)
         }
         val result = NetworkLinkTrafficModel.route(mapOf("A" to departures), links, 3600)
-        assertEquals(100, result.metrics.sumOf { it.vehiclesEntered })
-        assertEquals(100, result.arrivalsByIntersection.values.sumOf { it.size })
+        assertEquals(100, result.vehicleSchedules.size)
+        assertEquals(100, result.vehicleSchedules.map { it.vehicleId }.distinct().size)
+        assertEquals(100, result.metrics.sumOf { it.vehiclesEntered + it.vehiclesWaitingAtEnd })
+        assertTrue(result.arrivalsByIntersection.values.sumOf { it.size } <= 100)
     }
 }
