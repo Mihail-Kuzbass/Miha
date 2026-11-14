@@ -211,13 +211,18 @@ fun NetworkTrafficSimulationScreen(
         Button(
             onClick = {
                 if (isSimulating) return@Button
-                val base = intersections.associate { node ->
-                    node.id to node.laneConnections.map { movement ->
-                        val value = intensityValues[node.id + "|" + movement.id]?.replace(',', '.')?.toDoubleOrNull()
-                            ?: throw IllegalArgumentException("Проверьте интенсивность: ${node.name}")
-                        require(value.isFinite() && value >= 0.0) { "Интенсивность не может быть отрицательной" }
-                        MovementTrafficDemand(movement.id, value)
+                val base = try {
+                    intersections.associate { node ->
+                        node.id to node.laneConnections.map { movement ->
+                            val value = intensityValues[node.id + "|" + movement.id]?.replace(',', '.')?.toDoubleOrNull()
+                                ?: throw IllegalArgumentException("Проверьте интенсивность: ${node.name}")
+                            require(value.isFinite() && value >= 0.0) { "Интенсивность не может быть отрицательной" }
+                            MovementTrafficDemand(movement.id, value)
+                        }
                     }
+                } catch (error: Exception) {
+                    inputError = error.message ?: "Проверьте значения интенсивности"
+                    return@Button
                 }
                 inputError = null
                 isSimulating = true

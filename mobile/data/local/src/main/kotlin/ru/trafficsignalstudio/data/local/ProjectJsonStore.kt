@@ -348,7 +348,7 @@ class ProjectJsonStore(context: Context) {
         val coordinationJson = networkJson.optJSONObject("coordination") ?: JSONObject()
         val offsetsJson = coordinationJson.optJSONObject("offsetsSeconds") ?: JSONObject()
         val offsets = offsetsJson.keys().asSequence().mapNotNull { key ->
-            key.toIntOrNull()?.let { null } ?: runCatching { key to offsetsJson.getInt(key) }.getOrNull()
+            runCatching { key to offsetsJson.getInt(key) }.getOrNull()
         }.toMap()
         val coordination = ru.trafficsignalstudio.model.NetworkCoordinationSettings(
             enabled = coordinationJson.optBoolean("enabled", false),
