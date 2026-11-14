@@ -9,6 +9,8 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.hypot
+import kotlin.math.min
 
 enum class CoordinationIssueCode {
     NO_REFERENCE, MISSING_SIGNAL_PLAN, INVALID_SIGNAL_PLAN, CYCLE_MISMATCH,
@@ -96,8 +98,8 @@ object NetworkCoordinationCalculator {
         val directedLinks = buildList {
             network.trafficLinks.filter { it.enabled && it.fromIntersectionId in nodes && it.toIntersectionId in nodes }
                 .forEach { link ->
-                    if (settings.direction != CoordinationDirection.REVERSE) add(link.toDirected())
-                    if (settings.direction != CoordinationDirection.FORWARD) add(link.toDirected(reverse = true))
+                    if (settings.direction != CoordinationDirection.REVERSE) add(link.toDirected(settings))
+                    if (settings.direction != CoordinationDirection.FORWARD) add(link.toDirected(settings, reverse = true))
                 }
         }
         if (directedLinks.isEmpty()) {
@@ -281,14 +283,24 @@ object NetworkCoordinationCalculator {
         )
     }
 
-    private fun NetworkTrafficLink.toDirected(reverse: Boolean = false): DirectedLink =
-        if (!reverse) DirectedLink(
+    private fun NetworkTrafficLink.toDirected(
+        settings: NetworkCoordinationSettings,
+        reverse: Boolean = false
+    ): DirectedLink {
+        val effectiveDistance = if (centerline.size >= 2) {
+            centerline.zipWithNext().sumOf { (a, b) ->
+                hypot(b.xMeters - a.xMeters, b.yMeters - a.yMeters)
+            }
+        } else distanceMeters
+        val effectiveSpeed = min(settings.progressionSpeedKmh, travelSpeedKmh)
+        return if (!reverse) DirectedLink(
             fromIntersectionId, toIntersectionId, fromMovementConnectionId, toMovementConnectionId,
-            id, distanceMeters, travelSpeedKmh, flowSharePercent
+            id, effectiveDistance, effectiveSpeed, flowSharePercent
         ) else DirectedLink(
             toIntersectionId, fromIntersectionId, toMovementConnectionId, fromMovementConnectionId,
-            id, distanceMeters, travelSpeedKmh, flowSharePercent
+            id, effectiveDistance, effectiveSpeed, flowSharePercent
         )
+    }
 
     private fun localScore(
         nodeId: String,
