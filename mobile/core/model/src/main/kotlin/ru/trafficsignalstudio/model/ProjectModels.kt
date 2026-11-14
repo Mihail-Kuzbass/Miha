@@ -94,6 +94,8 @@ data class SignalPhase(
     val name: String,
     val greenConnectionIds: Set<String>,
     val greenSeconds: Int = 30,
+    /** Red+yellow transition before the phase green, seconds (GOST R 52289-2019, 7.5.2: up to 2 s). */
+    val redYellowSeconds: Int = 2,
     /** Permissive flashing-green interval before yellow. */
     val flashingGreenSeconds: Int = 3,
     val yellowSeconds: Int = 3,
@@ -200,7 +202,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 10
+        const val CURRENT_SCHEMA_VERSION = 11
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
