@@ -72,8 +72,8 @@ object SignalPlanTimingAnalyzer {
                 SignalPlanIssueCode.INVALID_GREEN_DURATION, "Зелёный интервал должен быть больше нуля", phaseId = phase.id)
             if (phase.flashingGreenSeconds < 0) diagnostics += SignalPlanDiagnostic(
                 SignalPlanIssueCode.INVALID_FLASHING_GREEN_DURATION, "Мигающий зелёный интервал не может быть отрицательным", phaseId = phase.id)
-            if (phase.yellowSeconds < 0) diagnostics += SignalPlanDiagnostic(
-                SignalPlanIssueCode.INVALID_YELLOW_DURATION, "Жёлтый интервал не может быть отрицательным", phaseId = phase.id)
+            if (phase.yellowSeconds != 3) diagnostics += SignalPlanDiagnostic(
+                SignalPlanIssueCode.INVALID_YELLOW_DURATION, "Жёлтый сигнал должен длиться 3 с согласно п. 7.5.2 ГОСТ Р 52289-2019", phaseId = phase.id)
             if (phase.allRedSeconds < 0) diagnostics += SignalPlanDiagnostic(
                 SignalPlanIssueCode.INVALID_ALL_RED_DURATION, "Общий красный интервал не может быть отрицательным", phaseId = phase.id)
             phase.greenConnectionIds.forEach { id ->
