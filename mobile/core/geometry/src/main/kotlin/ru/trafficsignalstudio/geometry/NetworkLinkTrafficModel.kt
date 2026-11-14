@@ -128,7 +128,7 @@ object NetworkLinkTrafficModel {
             val leaderPosition = positionAt(leader, time)
             val followerPosition = positionAt(follower, time)
             val leaderRearPosition = leaderPosition - leader.lengthMeters
-            if (followerPosition + follower.lengthMeters + follower.minimumGapMeters >
+            if (followerPosition + follower.minimumGapMeters >
                 leaderRearPosition - 1e-6) return false
             time += 0.25
         }
