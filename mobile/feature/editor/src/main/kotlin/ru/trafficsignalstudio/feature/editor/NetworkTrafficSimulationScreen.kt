@@ -764,8 +764,8 @@ private fun NetworkCoordinationDialog(
                 OutlinedTextField(value = cycle, onValueChange = { cycle = it.filter(Char::isDigit) },
                     label = { Text("Общий цикл, с (30–240)") }, singleLine = true)
                 OutlinedTextField(value = speed, onValueChange = { speed = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                    label = { Text("Целевая скорость координации, км/ч") },
-                    supportingText = { Text("Для каждого участка расчётная скорость ограничивается его заданной скоростью движения.") },
+                    label = { Text("Средняя скорость потока, км/ч") },
+                    supportingText = { Text("Указывайте среднюю фактическую скорость движения; для каждой связи она ограничивается скоростью участка.") },
                     singleLine = true)
                 NetworkDropdown("Опорный перекрёсток", network.intersections.map { NetworkChoice(it.id, it.name) },
                     reference) { reference = it }
