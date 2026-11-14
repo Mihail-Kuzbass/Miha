@@ -46,13 +46,13 @@
 
 В репозитории пока есть gradle/wrapper/gradle-wrapper.properties, но нет gradlew, gradlew.bat и gradle-wrapper.jar. До добавления официального Wrapper используйте установленный Gradle 9.7.0:
 
-§§§bash
+```bash
 gradle --version
 gradle :core:model:test
 gradle :core:geometry:test
 gradle :app:testDebugUnitTest
 gradle :app:assembleDebug
-§§§
+```
 
 APK:
 app/build/outputs/apk/debug/app-debug.apk
