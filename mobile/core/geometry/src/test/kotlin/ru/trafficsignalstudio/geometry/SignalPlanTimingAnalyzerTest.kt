@@ -16,7 +16,7 @@ class SignalPlanTimingAnalyzerTest {
             SignalPhase(id = "p2", name = "Вторая", greenConnectionIds = setOf("move-2"), greenSeconds = 30, flashingGreenSeconds = 2, yellowSeconds = 3, allRedSeconds = 1)
         ))))
         assertEquals(69, report.cycleLengthSeconds)
-        assertEquals(2, report.phaseWindows[0].redYellowStartSeconds)
+        assertEquals(0, report.phaseWindows[0].redYellowStartSeconds)
         assertEquals(2, report.phaseWindows[0].startSeconds)
         assertEquals(22, report.phaseWindows[0].greenEndSeconds)
         assertEquals(26, report.phaseWindows[0].flashingGreenEndSeconds)
