@@ -13,14 +13,15 @@ import kotlin.math.roundToInt
 enum class CoordinationIssueCode {
     NO_REFERENCE, MISSING_SIGNAL_PLAN, INVALID_SIGNAL_PLAN, CYCLE_MISMATCH,
     SOURCE_MOVEMENT_NOT_SIGNALLED, TARGET_MOVEMENT_NOT_SIGNALLED, UNREACHABLE_INTERSECTION,
-    NO_COORDINATED_LINKS
+    NO_COORDINATED_LINKS, LONG_COORDINATION_SECTION
 }
 
 data class CoordinationDiagnostic(
     val code: CoordinationIssueCode,
     val message: String,
     val intersectionId: String? = null,
-    val linkId: String? = null
+    val linkId: String? = null,
+    val isWarning: Boolean = false
 )
 
 data class CoordinationLinkResult(
@@ -226,9 +227,19 @@ object NetworkCoordinationCalculator {
             diagnostics += CoordinationDiagnostic(
                 CoordinationIssueCode.UNREACHABLE_INTERSECTION,
                 "Объект «${node.name}» не связан с опорным объектом в выбранном направлении; сдвиг не рассчитывался.",
-                intersectionId = node.id
+                intersectionId = node.id,
+                isWarning = true
             )
             offsets[node.id] = 0
+        }
+
+        usableLinks.filter { it.distanceMeters > 1000.0 }.forEach { link ->
+            diagnostics += CoordinationDiagnostic(
+                CoordinationIssueCode.LONG_COORDINATION_SECTION,
+                "Расстояние по связи «${link.id}» превышает 1 км. Проверьте применимость рекомендации ГОСТ Р 58653-2019, п. 8.3, для данного типа дороги.",
+                linkId = link.id,
+                isWarning = true
+            )
         }
 
         val linkResults = usableLinks.map { link ->
