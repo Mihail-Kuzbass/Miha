@@ -479,7 +479,7 @@ fun NetworkTrafficSimulationScreen(
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text("$fromName → $toName", style = MaterialTheme.typography.titleSmall)
-                            Text("Полос: $link.laneCount · въехало: $metric.vehiclesEntered · ожидает въезда к концу: $metric.vehiclesWaitingAtEnd · прибыло: $metric.vehiclesArrivedWithinHorizon")
+                            Text("Полос: $link.laneCount · хранение очереди: ${link.queueStorageLengthMeters.toInt()} м · въехало: $metric.vehiclesEntered · ожидает: $metric.vehiclesWaitingAtEnd · прибыло: $metric.vehiclesArrivedWithinHorizon")
                             Text("Макс. очередь на въезде: $metric.maximumEntryQueue авт. · средняя задержка: %.1f с · макс.: %.1f с".format(
                                 metric.averageEntryDelaySeconds, metric.maximumEntryDelaySeconds))
                             Text("Макс. длина очереди: %.1f м · вышло за вместимость участка: %d авт.".format(
@@ -545,6 +545,7 @@ private fun NetworkLinkDialog(
     var distance by remember { mutableStateOf("500") }
     var travelSpeed by remember { mutableStateOf("30") }
     var laneCount by remember { mutableStateOf("1") }
+    var queueStorage by remember { mutableStateOf("120") }
     var validationError by remember { mutableStateOf<String?>(null) }
     val source = intersections.firstOrNull { it.id == fromNode }
     val target = intersections.firstOrNull { it.id == toNode }
@@ -588,6 +589,8 @@ private fun NetworkLinkDialog(
                     label = { Text("Расчётная скорость на участке, км/ч") }, singleLine = true)
                 OutlinedTextField(value = laneCount, onValueChange = { laneCount = it.filter(Char::isDigit) },
                     label = { Text("Количество полос на участке (1–8)") }, singleLine = true)
+                OutlinedTextField(value = queueStorage, onValueChange = { queueStorage = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                    label = { Text("Длина хранения очереди на участке, м") }, singleLine = true)
                 validationError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
@@ -597,16 +600,19 @@ private fun NetworkLinkDialog(
                 val distanceValue = distance.replace(',', '.').toDoubleOrNull()
                 val speedValue = travelSpeed.replace(',', '.').toDoubleOrNull()
                 val laneValue = laneCount.toIntOrNull()
+                val queueStorageValue = queueStorage.replace(',', '.').toDoubleOrNull()
                 if (source != null && target != null && source.id != target.id &&
                     fromMovement.isNotBlank() && toMovement.isNotBlank() &&
                     shareValue != null && shareValue > 0.0 && shareValue <= availableSharePercent + 1e-6 &&
                     distanceValue != null && distanceValue in 1.0..100000.0 &&
-                    speedValue != null && speedValue in 5.0..120.0 && laneValue != null && laneValue in 1..8) {
+                    speedValue != null && speedValue in 5.0..120.0 && laneValue != null && laneValue in 1..8 &&
+                    queueStorageValue != null && queueStorageValue in 1.0..5000.0) {
                     onAdd(NetworkTrafficLink(
                         fromIntersectionId = fromNode, fromMovementConnectionId = fromMovement,
                         toIntersectionId = toNode, toMovementConnectionId = toMovement,
                         flowSharePercent = shareValue, distanceMeters = distanceValue,
-                        travelSpeedKmh = speedValue, laneCount = laneValue
+                        travelSpeedKmh = speedValue, laneCount = laneValue,
+                        queueStorageLengthMeters = queueStorageValue
                     ))
                 } else {
                     validationError = if (shareValue != null && shareValue > availableSharePercent + 1e-6)
