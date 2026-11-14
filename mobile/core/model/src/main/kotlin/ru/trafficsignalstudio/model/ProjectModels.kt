@@ -186,7 +186,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 8
+        const val CURRENT_SCHEMA_VERSION = 9
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
