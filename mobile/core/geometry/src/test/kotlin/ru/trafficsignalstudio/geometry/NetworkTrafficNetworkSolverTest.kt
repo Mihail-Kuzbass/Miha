@@ -31,7 +31,7 @@ class NetworkTrafficNetworkSolverTest {
         val result = NetworkTrafficNetworkSolver.run(
             intersectionIds = listOf("A", "B"),
             links = links,
-            durationSeconds = 35,
+            durationSeconds = 45,
             simulateIntersection = { nodeId, incoming ->
                 buildList {
                     if (nodeId == "A") add(VehicleDepartureEvent(
@@ -160,8 +160,9 @@ class NetworkTrafficNetworkSolverTest {
             fromMovementConnectionId = "out",
             toIntersectionId = "B",
             toMovementConnectionId = "in",
-            distanceMeters = 1.0,
-            travelSpeedKmh = 36.0
+            distanceMeters = 100.0,
+            travelSpeedKmh = 36.0,
+            queueStorageLengthMeters = 1.0
         )
         val result = NetworkLinkTrafficModel.route(
             mapOf("A" to listOf(
@@ -171,7 +172,7 @@ class NetworkTrafficNetworkSolverTest {
             listOf(link),
             60
         )
-        assertTrue(result.metrics.single().maximumEntryQueueLengthMeters > link.distanceMeters)
+        assertTrue(result.metrics.single().maximumEntryQueueLengthMeters > link.queueStorageLengthMeters)
         assertEquals(1, result.metrics.single().spillbackVehicles)
     }
 
