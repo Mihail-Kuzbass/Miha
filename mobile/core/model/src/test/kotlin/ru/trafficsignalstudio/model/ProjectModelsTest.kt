@@ -14,6 +14,19 @@ class ProjectModelsTest {
     }
 
     @Test
+    fun networkLinkHasBackwardCompatibleRoadDefaults() {
+        val link = NetworkTrafficLink(
+            fromIntersectionId = "A",
+            fromMovementConnectionId = "out",
+            toIntersectionId = "B",
+            toMovementConnectionId = "in"
+        )
+        assertEquals(1, link.laneCount)
+        assertEquals(120.0, link.queueStorageLengthMeters, 0.0)
+        assertEquals(30.0, link.travelSpeedKmh, 0.0)
+    }
+
+    @Test
     fun laneDefaultsToThroughMovement() {
         val lane = Lane(index = 1)
         assertTrue(lane.allowedMovements.contains(MovementKind.THROUGH))
