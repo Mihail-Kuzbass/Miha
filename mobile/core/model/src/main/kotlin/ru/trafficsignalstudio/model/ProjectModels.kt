@@ -141,7 +141,9 @@ data class NetworkTrafficLink(
     /** Free-flow travel speed on the link, used to schedule individual arrivals. */
     val travelSpeedKmh: Double = 30.0,
     /** Number of parallel lanes available on the inter-intersection road section. */
-    val laneCount: Int = 1
+    val laneCount: Int = 1,
+    /** Queue storage length before vehicles spill back into the upstream intersection, metres. */
+    val queueStorageLengthMeters: Double = 120.0
 ) {
     init {
         require(fromIntersectionId.isNotBlank() && toIntersectionId.isNotBlank())
@@ -151,6 +153,7 @@ data class NetworkTrafficLink(
         require(distanceMeters.isFinite() && distanceMeters in 1.0..100000.0)
         require(travelSpeedKmh.isFinite() && travelSpeedKmh in 5.0..120.0)
         require(laneCount in 1..8)
+        require(queueStorageLengthMeters.isFinite() && queueStorageLengthMeters in 1.0..5000.0)
     }
 }
 
