@@ -366,12 +366,17 @@ fun NetworkTrafficSimulationScreen(
                     try {
                         val computed = withContext(Dispatchers.Default) {
                             val coordination = network.coordination
-                            fun runNode(node: Intersection, demands: List<MovementTrafficDemand>): TrafficSimulationResult {
+                            fun runNode(
+                                node: Intersection,
+                                demands: List<MovementTrafficDemand>,
+                                externalArrivals: List<ExternalVehicleArrival> = emptyList()
+                            ): TrafficSimulationResult {
                                 val offset = if (coordination.enabled) {
                                     coordination.offsetsSeconds[node.id]?.toDouble() ?: 0.0
                                 } else 0.0
                                 return TrafficSimulationEngine.run(node, TrafficSimulationDemand(
                                     movements = demands,
+                                    externalArrivals = externalArrivals,
                                     durationSeconds = durationMinutes * 60,
                                     signalOffsetSeconds = offset,
                                     signalCycleLengthSeconds = if (coordination.enabled) coordination.cycleLengthSeconds else null,
