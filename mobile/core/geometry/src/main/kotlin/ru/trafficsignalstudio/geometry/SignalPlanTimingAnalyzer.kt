@@ -32,6 +32,7 @@ data class SignalPlanTimingReport(
 ) {
     val isValid: Boolean get() = diagnostics.none {
         it.code == SignalPlanIssueCode.NO_SIGNAL_PLAN ||
+            it.code == SignalPlanIssueCode.PLAN_DISABLED ||
             it.code == SignalPlanIssueCode.NO_PHASES ||
             it.code == SignalPlanIssueCode.DUPLICATE_PHASE_ID ||
             it.code == SignalPlanIssueCode.EMPTY_PHASE ||
@@ -46,7 +47,7 @@ data class SignalPlanTimingReport(
     }
 }
 
-/** Sequential cycle arithmetic; configured yellow and all-red are clearance intervals, not normative timings. */
+/** Sequential phase arithmetic including red-yellow, green, yellow and all-red intervals. */
 object SignalPlanTimingAnalyzer {
     fun analyze(intersection: Intersection): SignalPlanTimingReport {
         val plan = intersection.signalPlan ?: return SignalPlanTimingReport(0, emptyList(), listOf(
