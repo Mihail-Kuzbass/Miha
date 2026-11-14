@@ -27,6 +27,22 @@ class ProjectModelsTest {
     }
 
     @Test
+    fun networkLinkSupportsCurvedGeometryAndDynamicLaneChangesByDefault() {
+        val points = listOf(Point2D(0.0, 0.0), Point2D(100.0, 0.0), Point2D(100.0, 100.0))
+        val link = NetworkTrafficLink(
+            fromIntersectionId = "A",
+            fromMovementConnectionId = "out",
+            toIntersectionId = "B",
+            toMovementConnectionId = "in",
+            centerline = points,
+            laneCount = 3
+        )
+        assertEquals(points, link.centerline)
+        assertEquals(3.5, link.laneWidthMeters, 0.0)
+        assertTrue(link.laneChangesEnabled)
+    }
+
+    @Test
     fun laneDefaultsToThroughMovement() {
         val lane = Lane(index = 1)
         assertTrue(lane.allowedMovements.contains(MovementKind.THROUGH))
