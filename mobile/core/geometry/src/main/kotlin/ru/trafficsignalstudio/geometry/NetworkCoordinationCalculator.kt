@@ -123,6 +123,15 @@ object NetworkCoordinationCalculator {
                 }
                 return@forEach
             }
+            val nonStandardRedYellow = plan.phases.firstOrNull { it.redYellowSeconds !in 1..2 }
+            if (nonStandardRedYellow != null) {
+                diagnostics += CoordinationDiagnostic(
+                    CoordinationIssueCode.INVALID_SIGNAL_PLAN,
+                    "Фаза «${nonStandardRedYellow.name}» объекта «${node.name}»: красный с жёлтым должен длиться не более 2 с и присутствовать в координированном режиме согласно п. 7.5.2 ГОСТ Р 52289-2019.",
+                    intersectionId = node.id
+                )
+                return@forEach
+            }
             val nonStandardYellow = plan.phases.firstOrNull { it.yellowSeconds != 3 }
             if (nonStandardYellow != null) {
                 diagnostics += CoordinationDiagnostic(
