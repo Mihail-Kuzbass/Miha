@@ -3,6 +3,8 @@ package ru.trafficsignalstudio.geometry
 import ru.trafficsignalstudio.model.NetworkTrafficLink
 import ru.trafficsignalstudio.model.VehicleModelCatalog
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
  * Routes individual vehicles through finite-capacity road links.
@@ -25,13 +27,74 @@ object NetworkLinkTrafficModel {
         val vehiclesArrivedWithinHorizon: Int,
         val maximumEntryQueue: Int,
         val averageEntryDelaySeconds: Double,
-        val maximumEntryDelaySeconds: Double
+        val maximumEntryDelaySeconds: Double,
+        val maximumEntryQueueLengthMeters: Double,
+        val spillbackVehicles: Int
+    )
+
+    data class VehicleSchedule(
+        val linkId: String,
+        val vehicleId: Long,
+        val vehicleClass: ru.trafficsignalstudio.model.VehicleClass?,
+        val laneIndex: Int,
+        val departureTimeSeconds: Double,
+        val entryTimeSeconds: Double,
+        val arrivalTimeSeconds: Double,
+        val distanceMeters: Double,
+        val accelerationMetersPerSecondSquared: Double,
+        val cruiseSpeedMetersPerSecond: Double,
+        val lengthMeters: Double,
+        val widthMeters: Double
+    )
+
+    data class VehicleSnapshot(
+        val linkId: String,
+        val vehicleId: Long,
+        val vehicleClass: ru.trafficsignalstudio.model.VehicleClass?,
+        val laneIndex: Int,
+        val positionMeters: Double,
+        val speedMetersPerSecond: Double,
+        val lengthMeters: Double,
+        val widthMeters: Double,
+        val queuedAtEntry: Boolean
     )
 
     data class Result(
         val arrivalsByIntersection: Map<String, List<ExternalVehicleArrival>>,
-        val metrics: List<LinkMetrics>
-    )
+        val metrics: List<LinkMetrics>,
+        val vehicleSchedules: List<VehicleSchedule>
+    ) {
+        /** Returns the current physical state of vehicles on all inter-intersection links. */
+        fun vehiclesAt(timeSeconds: Double): List<VehicleSnapshot> =
+            vehicleSchedules.mapNotNull { schedule ->
+                if (timeSeconds < schedule.departureTimeSeconds || timeSeconds >= schedule.arrivalTimeSeconds) {
+                    return@mapNotNull null
+                }
+                val queued = timeSeconds < schedule.entryTimeSeconds
+                val elapsed = (timeSeconds - schedule.entryTimeSeconds).coerceAtLeast(0.0)
+                val acceleration = schedule.accelerationMetersPerSecondSquared
+                val accelTime = schedule.cruiseSpeedMetersPerSecond / acceleration
+                val accelDistance = 0.5 * acceleration * accelTime * accelTime
+                val position = if (queued) 0.0 else if (elapsed < accelTime) {
+                    0.5 * acceleration * elapsed * elapsed
+                } else {
+                    accelDistance + schedule.cruiseSpeedMetersPerSecond * (elapsed - accelTime)
+                }.coerceIn(0.0, schedule.distanceMeters)
+                val speed = if (queued) 0.0 else
+                    min(schedule.cruiseSpeedMetersPerSecond, acceleration * elapsed)
+                VehicleSnapshot(
+                    linkId = schedule.linkId,
+                    vehicleId = schedule.vehicleId,
+                    vehicleClass = schedule.vehicleClass,
+                    laneIndex = schedule.laneIndex,
+                    positionMeters = position,
+                    speedMetersPerSecond = speed,
+                    lengthMeters = schedule.lengthMeters,
+                    widthMeters = schedule.widthMeters,
+                    queuedAtEntry = queued
+                )
+            }
+    }
 
     private data class Candidate(
         val link: NetworkTrafficLink,
@@ -75,19 +138,21 @@ object NetworkLinkTrafficModel {
 
         val arrivals = mutableMapOf<String, MutableList<ExternalVehicleArrival>>()
         val metrics = mutableListOf<LinkMetrics>()
+        val schedules = mutableListOf<VehicleSchedule>()
         enabled.forEach { link ->
             val candidates = candidatesByLink[link.id].orEmpty().sortedWith(
                 compareBy<Candidate> { it.departure.timeSeconds }.thenBy { it.departure.vehicleId }
             )
             val nextEntryAt = DoubleArray(link.laneCount)
             val entryDelays = mutableListOf<Double>()
-            val queueEvents = mutableListOf<Pair<Double, Int>>()
+            val queueEvents = mutableListOf<Triple<Double, Int, Double>>()
             var arrivedWithinHorizon = 0
+            val linkSpeed = link.travelSpeedKmh / 3.6
             candidates.forEach { candidate ->
                 val vehicleModel = candidate.departure.vehicleClass?.let { vehicleClass ->
                     VehicleModelCatalog.defaults.firstOrNull { it.vehicleClass == vehicleClass }
                 } ?: VehicleModelCatalog.defaultPassengerCar
-                val speed = link.travelSpeedKmh / 3.6
+                val speed = min(linkSpeed, vehicleModel.maximumSpeedKmh / 3.6).coerceAtLeast(0.1)
                 val safeHeadway = max(
                     vehicleModel.desiredTimeHeadwaySeconds,
                     (vehicleModel.lengthMeters + vehicleModel.minimumGapMeters) / speed
@@ -96,13 +161,35 @@ object NetworkLinkTrafficModel {
                 val entryTime = max(candidate.departure.timeSeconds, nextEntryAt[laneIndex])
                 val entryDelay = entryTime - candidate.departure.timeSeconds
                 nextEntryAt[laneIndex] = entryTime + safeHeadway
-                val freeFlowTravelTime = link.distanceMeters / speed
-                val arrivalTime = entryTime + freeFlowTravelTime
+                val acceleration = vehicleModel.accelerationMetersPerSecondSquared.coerceAtLeast(0.1)
+                val accelTime = speed / acceleration
+                val accelDistance = 0.5 * acceleration * accelTime * accelTime
+                val travelTime = if (link.distanceMeters <= accelDistance) {
+                    sqrt(2.0 * link.distanceMeters / acceleration)
+                } else {
+                    accelTime + (link.distanceMeters - accelDistance) / speed
+                }
+                val arrivalTime = entryTime + travelTime
                 entryDelays += entryDelay
                 if (entryDelay > 1e-9) {
-                    queueEvents += candidate.departure.timeSeconds to 1
-                    queueEvents += entryTime to -1
+                    val queueLength = vehicleModel.lengthMeters + vehicleModel.minimumGapMeters
+                    queueEvents += Triple(candidate.departure.timeSeconds, 1, queueLength)
+                    queueEvents += Triple(entryTime, -1, -queueLength)
                 }
+                schedules += VehicleSchedule(
+                    linkId = link.id,
+                    vehicleId = candidate.departure.vehicleId,
+                    vehicleClass = candidate.departure.vehicleClass,
+                    laneIndex = laneIndex,
+                    departureTimeSeconds = candidate.departure.timeSeconds,
+                    entryTimeSeconds = entryTime,
+                    arrivalTimeSeconds = arrivalTime,
+                    distanceMeters = link.distanceMeters,
+                    accelerationMetersPerSecondSquared = acceleration,
+                    cruiseSpeedMetersPerSecond = speed,
+                    lengthMeters = vehicleModel.lengthMeters,
+                    widthMeters = vehicleModel.widthMeters
+                )
                 if (arrivalTime <= durationSeconds + 1e-9) {
                     arrivals.getOrPut(link.toIntersectionId) { mutableListOf() } += ExternalVehicleArrival(
                         timeSeconds = arrivalTime,
@@ -115,10 +202,16 @@ object NetworkLinkTrafficModel {
             }
             var queue = 0
             var maximumQueue = 0
-            queueEvents.sortedWith(compareBy<Pair<Double, Int>> { it.first }.thenBy { it.second })
-                .forEach { (_, delta) ->
+            var queueLength = 0.0
+            var maximumQueueLength = 0.0
+            var spillbackVehicles = 0
+            queueEvents.sortedWith(compareBy<Triple<Double, Int, Double>> { it.first }.thenBy { it.second })
+                .forEach { (_, delta, lengthDelta) ->
                     queue = (queue + delta).coerceAtLeast(0)
+                    queueLength = (queueLength + lengthDelta).coerceAtLeast(0.0)
                     maximumQueue = max(maximumQueue, queue)
+                    maximumQueueLength = max(maximumQueueLength, queueLength)
+                    if (queueLength > link.distanceMeters * link.laneCount) spillbackVehicles++
                 }
             metrics += LinkMetrics(
                 linkId = link.id,
@@ -126,12 +219,15 @@ object NetworkLinkTrafficModel {
                 vehiclesArrivedWithinHorizon = arrivedWithinHorizon,
                 maximumEntryQueue = maximumQueue,
                 averageEntryDelaySeconds = entryDelays.average().takeIf { it.isFinite() } ?: 0.0,
-                maximumEntryDelaySeconds = entryDelays.maxOrNull() ?: 0.0
+                maximumEntryDelaySeconds = entryDelays.maxOrNull() ?: 0.0,
+                maximumEntryQueueLengthMeters = maximumQueueLength,
+                spillbackVehicles = spillbackVehicles
             )
         }
         return Result(
             arrivalsByIntersection = arrivals.mapValues { it.value.sortedBy(ExternalVehicleArrival::timeSeconds) },
-            metrics = metrics
+            metrics = metrics,
+            vehicleSchedules = schedules
         )
     }
 }
