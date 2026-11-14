@@ -66,40 +66,46 @@ object NetworkLinkTrafficModel {
     ) {
         /** Returns the current physical state of vehicles on all inter-intersection links. */
         fun vehiclesAt(timeSeconds: Double): List<VehicleSnapshot> =
-            vehicleSchedules.mapNotNull { schedule ->
-                if (timeSeconds < schedule.departureTimeSeconds || timeSeconds >= schedule.arrivalTimeSeconds) {
-                    return@mapNotNull null
-                }
-                val queued = timeSeconds < schedule.entryTimeSeconds
-                val elapsed = (timeSeconds - schedule.entryTimeSeconds).coerceAtLeast(0.0)
-                val acceleration = schedule.accelerationMetersPerSecondSquared
-                val accelTime = schedule.cruiseSpeedMetersPerSecond / acceleration
-                val accelDistance = 0.5 * acceleration * accelTime * accelTime
-                val position = if (queued) 0.0 else if (elapsed < accelTime) {
-                    0.5 * acceleration * elapsed * elapsed
-                } else {
-                    accelDistance + schedule.cruiseSpeedMetersPerSecond * (elapsed - accelTime)
-                }.coerceIn(0.0, schedule.distanceMeters)
-                val speed = if (queued) 0.0 else
-                    min(schedule.cruiseSpeedMetersPerSecond, acceleration * elapsed)
-                VehicleSnapshot(
-                    linkId = schedule.linkId,
-                    vehicleId = schedule.vehicleId,
-                    vehicleClass = schedule.vehicleClass,
-                    laneIndex = schedule.laneIndex,
-                    positionMeters = position,
-                    speedMetersPerSecond = speed,
-                    lengthMeters = schedule.lengthMeters,
-                    widthMeters = schedule.widthMeters,
-                    queuedAtEntry = queued
-                )
-            }
+            NetworkLinkTrafficModel.vehiclesAt(vehicleSchedules, timeSeconds)
     }
 
     private data class Candidate(
         val link: NetworkTrafficLink,
         val departure: VehicleDepartureEvent
     )
+
+    fun vehiclesAt(
+        schedules: List<VehicleSchedule>,
+        timeSeconds: Double
+    ): List<VehicleSnapshot> = schedules.mapNotNull { schedule ->
+        if (timeSeconds < schedule.departureTimeSeconds || timeSeconds >= schedule.arrivalTimeSeconds) {
+            return@mapNotNull null
+        }
+        val queued = timeSeconds < schedule.entryTimeSeconds
+        val elapsed = (timeSeconds - schedule.entryTimeSeconds).coerceAtLeast(0.0)
+        val acceleration = schedule.accelerationMetersPerSecondSquared
+        val accelTime = schedule.cruiseSpeedMetersPerSecond / acceleration
+        val accelDistance = 0.5 * acceleration * accelTime * accelTime
+        val rawPosition = if (queued) 0.0 else if (elapsed < accelTime) {
+            0.5 * acceleration * elapsed * elapsed
+        } else {
+            accelDistance + schedule.cruiseSpeedMetersPerSecond * (elapsed - accelTime)
+        }
+        val position = rawPosition.coerceIn(0.0, schedule.distanceMeters)
+        val speed = if (queued) 0.0 else
+            min(schedule.cruiseSpeedMetersPerSecond, acceleration * elapsed)
+        VehicleSnapshot(
+            linkId = schedule.linkId,
+            vehicleId = schedule.vehicleId,
+            vehicleClass = schedule.vehicleClass,
+            laneIndex = schedule.laneIndex,
+            positionMeters = position,
+            speedMetersPerSecond = speed,
+            lengthMeters = schedule.lengthMeters,
+            widthMeters = schedule.widthMeters,
+            queuedAtEntry = queued
+        )
+    }
 
     fun route(
         departuresByIntersection: Map<String, List<VehicleDepartureEvent>>,
@@ -211,7 +217,7 @@ object NetworkLinkTrafficModel {
                     queueLength = (queueLength + lengthDelta).coerceAtLeast(0.0)
                     maximumQueue = max(maximumQueue, queue)
                     maximumQueueLength = max(maximumQueueLength, queueLength)
-                    if (queueLength > link.distanceMeters * link.laneCount) spillbackVehicles++
+                    if (delta > 0 && queueLength > link.distanceMeters * link.laneCount) spillbackVehicles++
                 }
             metrics += LinkMetrics(
                 linkId = link.id,
