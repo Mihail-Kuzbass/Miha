@@ -659,7 +659,7 @@ private fun NetworkLinkTrafficDiagram(
                 else -> Color(0xFF90CAF9)
             }
             drawRoundRect(
-                color = if (vehicle.queuedAtEntry) Color(0xFFFFC857) else color,
+                color = color,
                 topLeft = Offset(x, y),
                 size = androidx.compose.ui.geometry.Size(vehicleWidth, laneHeight * 0.6f),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
