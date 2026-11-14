@@ -157,12 +157,19 @@ object NetworkLinkTrafficModel {
                     .asSequence()
                     .filter { it.connectionId == source.second }
                     .forEach departureLoop@{ departure ->
+                        // Assign a stable network-wide identity once; preserve it on every later hop.
+                        val networkVehicleId = if (departure.vehicleId >= NETWORK_VEHICLE_ID_BASE) {
+                            departure.vehicleId
+                        } else {
+                            val sourcePart = (source.first.hashCode().toLong() and 0x3fffffffL) shl 32
+                            NETWORK_VEHICLE_ID_BASE or sourcePart or (departure.vehicleId and 0xffffffffL)
+                        }
                         // Deterministic partition: every vehicle is assigned to at most one link.
-                        val bucket = Math.floorMod(departure.vehicleId * 7919L, 10000L) / 100.0
+                        val bucket = Math.floorMod(networkVehicleId * 7919L, 10000L) / 100.0
                         val selected = cumulative.firstOrNull { bucket < it.second }?.first
                             ?: return@departureLoop
                         candidatesByLink.getOrPut(selected.id) { mutableListOf() }
-                            .add(Candidate(selected, departure))
+                            .add(Candidate(selected, departure.copy(vehicleId = networkVehicleId)))
                     }
             }
 
