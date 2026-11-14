@@ -72,6 +72,7 @@ private data class NetworkChoice(val id: String, val title: String)
 private data class NetworkSimulationOutput(
     val nodeResults: Map<String, TrafficSimulationResult>,
     val linkMetrics: List<NetworkLinkTrafficModel.LinkMetrics>,
+    val vehicleSchedules: List<NetworkLinkTrafficModel.VehicleSchedule>,
     val propagationIterations: Int,
     val converged: Boolean
 )
@@ -96,6 +97,7 @@ fun NetworkTrafficSimulationScreen(
     var durationMinutes by remember(project.id) { mutableStateOf(10) }
     var results by remember(project.id) { mutableStateOf<Map<String, TrafficSimulationResult>>(emptyMap()) }
     var linkMetrics by remember(project.id) { mutableStateOf<List<NetworkLinkTrafficModel.LinkMetrics>>(emptyList()) }
+    var linkVehicleSchedules by remember(project.id) { mutableStateOf<List<NetworkLinkTrafficModel.VehicleSchedule>>(emptyList()) }
     var networkPropagationIterations by remember(project.id) { mutableStateOf(0) }
     var networkPropagationConverged by remember(project.id) { mutableStateOf(true) }
     var isSimulating by remember { mutableStateOf(false) }
@@ -414,12 +416,14 @@ fun NetworkTrafficSimulationScreen(
                             NetworkSimulationOutput(
                                 nodeResults = nodeResults,
                                 linkMetrics = networkRun.linkMetrics,
+                                vehicleSchedules = networkRun.vehicleSchedules,
                                 propagationIterations = networkRun.propagationIterations,
                                 converged = networkRun.converged
                             )
                         }
                         results = computed.nodeResults
                         linkMetrics = computed.linkMetrics
+                        linkVehicleSchedules = computed.vehicleSchedules
                         networkPropagationIterations = computed.propagationIterations
                         networkPropagationConverged = computed.converged
                         selectedSnapshotIndex = 0
@@ -443,6 +447,11 @@ fun NetworkTrafficSimulationScreen(
         }
         inputError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (results.isNotEmpty()) {
+            val networkModelTimeSeconds = results.values.firstOrNull()?.snapshots
+                ?.getOrNull(selectedSnapshotIndex)?.timeSeconds ?: 0.0
+            val activeLinkVehicles = NetworkLinkTrafficModel.vehiclesAt(
+                linkVehicleSchedules, networkModelTimeSeconds
+            )
             Text("Итоги по узлам", style = MaterialTheme.typography.titleLarge)
             intersections.forEach { node ->
                 val result = results[node.id] ?: return@forEach
@@ -473,6 +482,11 @@ fun NetworkTrafficSimulationScreen(
                             Text("Полос: $link.laneCount · вошло: $metric.vehiclesEntered · прибыло за период: $metric.vehiclesArrivedWithinHorizon")
                             Text("Макс. очередь на въезде: $metric.maximumEntryQueue авт. · средняя задержка: %.1f с · макс.: %.1f с".format(
                                 metric.averageEntryDelaySeconds, metric.maximumEntryDelaySeconds))
+                            Text("Макс. длина очереди: %.1f м · вышло за вместимость участка: %d авт.".format(
+                                metric.maximumEntryQueueLengthMeters, metric.spillbackVehicles))
+                            val vehiclesOnLink = activeLinkVehicles.filter { it.linkId == link.id }
+                            Text("На участке в момент %.0f с: %d авт.".format(networkModelTimeSeconds, vehiclesOnLink.size))
+                            NetworkLinkTrafficDiagram(link, vehiclesOnLink)
                         }
                     }
                 }
@@ -603,6 +617,49 @@ private fun NetworkLinkDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+}
+
+@Composable
+private fun NetworkLinkTrafficDiagram(
+    link: NetworkTrafficLink,
+    vehicles: List<NetworkLinkTrafficModel.VehicleSnapshot>
+) {
+    Canvas(modifier = Modifier.fillMaxWidth().height((link.laneCount * 24 + 8).dp)) {
+        val laneHeight = size.height / link.laneCount
+        drawRect(color = Color(0xFF42464D), size = size)
+        for (lane in 1 until link.laneCount) {
+            val y = lane * laneHeight
+            drawLine(
+                color = Color.White.copy(alpha = 0.65f),
+                start = Offset(0f, y),
+                end = Offset(size.width, y),
+                strokeWidth = 1.5f
+            )
+        }
+        vehicles.forEach { vehicle ->
+            val lane = vehicle.laneIndex.coerceIn(0, link.laneCount - 1)
+            val vehicleWidth = (vehicle.lengthMeters / link.distanceMeters * size.width)
+                .coerceIn(7f, 24f)
+            val x = (vehicle.positionMeters / link.distanceMeters * size.width - vehicleWidth / 2f)
+                .coerceIn(0f, (size.width - vehicleWidth).coerceAtLeast(0f))
+            val y = lane * laneHeight + laneHeight * 0.2f
+            val color = when (vehicle.vehicleClass) {
+                ru.trafficsignalstudio.model.VehicleClass.CITY_BUS,
+                ru.trafficsignalstudio.model.VehicleClass.ARTICULATED_BUS,
+                ru.trafficsignalstudio.model.VehicleClass.TROLLEYBUS,
+                ru.trafficsignalstudio.model.VehicleClass.ARTICULATED_TROLLEYBUS -> Color(0xFF35B7A5)
+                ru.trafficsignalstudio.model.VehicleClass.RIGID_TRUCK,
+                ru.trafficsignalstudio.model.VehicleClass.ARTICULATED_TRUCK -> Color(0xFFE6A23C)
+                else -> Color(0xFF90CAF9)
+            }
+            drawRoundRect(
+                color = if (vehicle.queuedAtEntry) Color(0xFFFFC857) else color,
+                topLeft = Offset(x, y),
+                size = androidx.compose.ui.geometry.Size(vehicleWidth, laneHeight * 0.6f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+            )
+        }
+    }
 }
 
 @Composable
