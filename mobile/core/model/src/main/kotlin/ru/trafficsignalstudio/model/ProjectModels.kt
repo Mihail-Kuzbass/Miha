@@ -143,7 +143,13 @@ data class NetworkTrafficLink(
     /** Number of parallel lanes available on the inter-intersection road section. */
     val laneCount: Int = 1,
     /** Queue storage length before vehicles spill back into the upstream intersection, metres. */
-    val queueStorageLengthMeters: Double = 120.0
+    val queueStorageLengthMeters: Double = 120.0,
+    /** Optional road centreline in local network coordinates; empty keeps legacy straight geometry. */
+    val centerline: List<Point2D> = emptyList(),
+    /** Physical width of each inter-node lane, metres. */
+    val laneWidthMeters: Double = 3.5,
+    /** Whether vehicles may perform safe lane changes while travelling on this link. */
+    val laneChangesEnabled: Boolean = true
 ) {
     init {
         require(fromIntersectionId.isNotBlank() && toIntersectionId.isNotBlank())
@@ -154,6 +160,11 @@ data class NetworkTrafficLink(
         require(travelSpeedKmh.isFinite() && travelSpeedKmh in 5.0..120.0)
         require(laneCount in 1..8)
         require(queueStorageLengthMeters.isFinite() && queueStorageLengthMeters in 1.0..5000.0)
+        require(centerline.isEmpty() || centerline.size >= 2) {
+            "Геометрия межузловой дороги должна содержать минимум две точки."
+        }
+        require(centerline.all { it.xMeters.isFinite() && it.yMeters.isFinite() })
+        require(laneWidthMeters.isFinite() && laneWidthMeters in 2.5..5.0)
     }
 }
 
@@ -186,7 +197,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 9
+        const val CURRENT_SCHEMA_VERSION = 10
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
