@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.trafficsignalstudio.geometry.CrashRiskBand
 import ru.trafficsignalstudio.geometry.CrashSimulationMode
+import ru.trafficsignalstudio.geometry.ExternalVehicleArrival
 import ru.trafficsignalstudio.geometry.ManualCrashEvent
 import ru.trafficsignalstudio.geometry.MovementTrafficDemand
 import ru.trafficsignalstudio.geometry.NetworkCoordinationCalculator
@@ -79,6 +80,9 @@ fun NetworkTrafficSimulationScreen(
         mutableStateOf(intersections.flatMap { node ->
             node.laneConnections.map { node.id + "|" + it.id to "600" }
         }.toMap())
+    }
+    var manualInputKeys by remember(project.id, network.trafficLinks) {
+        mutableStateOf(emptySet<String>())
     }
     var durationMinutes by remember(project.id) { mutableStateOf(10) }
     var results by remember(project.id) { mutableStateOf<Map<String, TrafficSimulationResult>>(emptyMap()) }
@@ -247,18 +251,49 @@ fun NetworkTrafficSimulationScreen(
                         Text("Нет настроенных движений. Добавьте полосы и соединения в редакторе.",
                             style = MaterialTheme.typography.bodySmall)
                     }
-                    node.laneConnections.forEachIndexed { movementIndex, movement ->
+                    node.laneConnections.forEach { movement ->
                         val key = node.id + "|" + movement.id
-                        OutlinedTextField(
-                            value = intensityValues[key] ?: "600",
-                            onValueChange = { raw ->
-                                intensityValues = intensityValues + (key to raw.filter { it.isDigit() || it == '.' || it == ',' })
-                                results = emptyMap()
-                            },
-                            label = { Text("${movementLabelsByIntersection[node.id]?.get(movement.id) ?: "Траектория не определена"}, авт./ч") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                        val hasIncomingLink = network.trafficLinks.any {
+                            it.enabled && it.toIntersectionId == node.id &&
+                                it.toMovementConnectionId == movement.id
+                        }
+                        val manual = !hasIncomingLink || key in manualInputKeys
+                        if (hasIncomingLink) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(movementLabelsByIntersection[node.id]?.get(movement.id)
+                                        ?: "Траектория не определена")
+                                    Text(if (manual) "Ручной ввод интенсивности" else
+                                        "Автоматически: автомобили поступают по связанным дорогам",
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(
+                                    checked = manual,
+                                    onCheckedChange = {
+                                        manualInputKeys = if (it) manualInputKeys + key else manualInputKeys - key
+                                        results = emptyMap()
+                                    }
+                                )
+                            }
+                        }
+                        if (manual) {
+                            OutlinedTextField(
+                                value = intensityValues[key] ?: "600",
+                                onValueChange = { raw ->
+                                    intensityValues = intensityValues + (key to raw.filter {
+                                        it.isDigit() || it == '.' || it == ','
+                                    })
+                                    results = emptyMap()
+                                },
+                                label = { Text("Внешний поток, авт./ч") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        }
                     }
                 }
             }
@@ -276,7 +311,7 @@ fun NetworkTrafficSimulationScreen(
                             Text("${from?.name ?: "Удалённый узел"} → ${to?.name ?: "Удалённый узел"}")
                             Text("${movementLabelsByIntersection[link.fromIntersectionId]?.get(link.fromMovementConnectionId) ?: "Исходная траектория не найдена"} → ${movementLabelsByIntersection[link.toIntersectionId]?.get(link.toMovementConnectionId) ?: "Конечная траектория не найдена"}",
                                 style = MaterialTheme.typography.bodySmall)
-                            Text("${link.flowSharePercent.toInt()}% потока · ${link.distanceMeters.toInt()} м",
+                            Text("${link.flowSharePercent.toInt()}% потока · ${link.distanceMeters.toInt()} м · ${link.travelSpeedKmh.toInt()} км/ч",
                                 style = MaterialTheme.typography.labelSmall)
                         }
                         TextButton(onClick = {
@@ -307,8 +342,15 @@ fun NetworkTrafficSimulationScreen(
                 val base = try {
                     intersections.associate { node ->
                         node.id to node.laneConnections.map { movement ->
-                            val value = intensityValues[node.id + "|" + movement.id]?.replace(',', '.')?.toDoubleOrNull()
-                                ?: throw IllegalArgumentException("Проверьте интенсивность: ${node.name}")
+                            val key = node.id + "|" + movement.id
+                            val hasIncomingLink = network.trafficLinks.any {
+                                it.enabled && it.toIntersectionId == node.id &&
+                                    it.toMovementConnectionId == movement.id
+                            }
+                            val manual = !hasIncomingLink || key in manualInputKeys
+                            val value = if (!manual) 0.0 else
+                                intensityValues[key]?.replace(',', '.')?.toDoubleOrNull()
+                                    ?: throw IllegalArgumentException("Проверьте интенсивность: ${node.name}")
                             require(value.isFinite() && value >= 0.0) { "Интенсивность не может быть отрицательной" }
                             MovementTrafficDemand(movement.id, value)
                         }
@@ -337,25 +379,72 @@ fun NetworkTrafficSimulationScreen(
                                     manualCrashEvents = if (crashMode == CrashSimulationMode.EXPERIMENTAL) manualCrashEvents else emptyList()
                                 ))
                             }
-                            val baseline = intersections.associate { node ->
-                                node.id to runNode(node, base[node.id].orEmpty())
-                            }
-                            val incoming = mutableMapOf<Pair<String, String>, Double>()
-                            network.trafficLinks.filter { it.enabled }.forEach { link ->
-                                val source = baseline[link.fromIntersectionId] ?: return@forEach
-                                val metric = source.movementMetrics.firstOrNull { it.connectionId == link.fromMovementConnectionId }
-                                    ?: return@forEach
-                                val rate = metric.departures * 3600.0 / source.durationSeconds.coerceAtLeast(1)
-                                val key = link.toIntersectionId to link.toMovementConnectionId
-                                incoming[key] = (incoming[key] ?: 0.0) + rate * link.flowSharePercent / 100.0
-                            }
-                            intersections.associate { node ->
-                                val adjusted = base[node.id].orEmpty().map { demand ->
-                                    demand.copy(totalVehiclesPerHour = demand.totalVehiclesPerHour +
-                                        (incoming[node.id to demand.connectionId] ?: 0.0))
+                            val enabledLinks = network.trafficLinks.filter { it.enabled }
+                            // Vehicle-level transfer requires upstream nodes to be simulated
+                            // before downstream nodes. A cyclic route is rejected explicitly
+                            // rather than silently replacing individual vehicles with rates.
+                            val indegree = intersections.associate { it.id to 0 }.toMutableMap()
+                            enabledLinks.forEach { link ->
+                                if (link.fromIntersectionId in indegree && link.toIntersectionId in indegree) {
+                                    indegree[link.toIntersectionId] = (indegree[link.toIntersectionId] ?: 0) + 1
                                 }
-                                node.id to runNode(node, adjusted)
                             }
+                            val ready = ArrayDeque(intersections.filter { indegree[it.id] == 0 }.map { it.id })
+                            val orderedIds = mutableListOf<String>()
+                            while (ready.isNotEmpty()) {
+                                val id = ready.removeFirst()
+                                orderedIds += id
+                                enabledLinks.filter { it.fromIntersectionId == id }.forEach { link ->
+                                    val next = (indegree[link.toIntersectionId] ?: 0) - 1
+                                    indegree[link.toIntersectionId] = next
+                                    if (next == 0) ready.addLast(link.toIntersectionId)
+                                }
+                            }
+                            require(orderedIds.size == intersections.size) {
+                                "В сети обнаружен замкнутый маршрут. Для точного переноса автомобилей сначала разорвите цикл связей; поддержка циклического движения будет добавлена отдельным этапом."
+                            }
+                            val nodeById = intersections.associateBy { it.id }
+                            val incomingEvents = mutableMapOf<String, MutableList<ExternalVehicleArrival>>()
+                            val computed = linkedMapOf<String, TrafficSimulationResult>()
+                            orderedIds.forEach { nodeId ->
+                                val node = nodeById.getValue(nodeId)
+                                val result = runNode(
+                                    node,
+                                    base[nodeId].orEmpty(),
+                                    incomingEvents[nodeId].orEmpty()
+                                )
+                                computed[nodeId] = result
+                                val linksByMovement = enabledLinks
+                                    .filter { it.fromIntersectionId == nodeId }
+                                    .groupBy { it.fromMovementConnectionId }
+                                linksByMovement.forEach { (movementId, links) ->
+                                    val cumulative = mutableListOf<Pair<NetworkTrafficLink, Double>>()
+                                    var boundary = 0.0
+                                    links.sortedBy { it.id }.forEach { link ->
+                                        boundary += link.flowSharePercent
+                                        cumulative += link to boundary
+                                    }
+                                    result.departureEvents.asSequence()
+                                        .filter { it.connectionId == movementId }
+                                        .forEach { departure ->
+                                            // A stable vehicle-specific bucket partitions a
+                                            // source flow between links without duplicating cars.
+                                            val bucket = Math.floorMod(departure.vehicleId * 7919L, 10000L) / 100.0
+                                            val selected = cumulative.firstOrNull { bucket < it.second }?.first
+                                                ?: return@forEach
+                                            val travelSeconds = selected.distanceMeters /
+                                                (selected.travelSpeedKmh / 3.6)
+                                            incomingEvents.getOrPut(selected.toIntersectionId) { mutableListOf() }
+                                                .add(ExternalVehicleArrival(
+                                                    timeSeconds = departure.timeSeconds + travelSeconds,
+                                                    connectionId = selected.toMovementConnectionId,
+                                                    vehicleClass = departure.vehicleClass,
+                                                    sourceVehicleId = departure.vehicleId
+                                                ))
+                                        }
+                                }
+                            }
+                            computed
                         }
                         results = computed
                         selectedSnapshotIndex = 0
@@ -390,7 +479,7 @@ fun NetworkTrafficSimulationScreen(
                     }
                 }
             }
-            Text("Связанные потоки рассчитываются по фактическому выпуску исходного движения и доле, заданной в связи. В этой версии передаётся средняя интенсивность на следующий узел; физический перенос конкретного автомобиля по межузловому участку с накоплением в пути будет следующим этапом.",
+            Text("Между узлами передаются конкретные автомобили: сохраняется класс, учитывается время проезда по расстоянию и скорости участка. Доля связей распределяет автомобили между выходными маршрутами без двойного учёта.",
                 style = MaterialTheme.typography.labelSmall)
         }
     }
@@ -444,6 +533,7 @@ private fun NetworkLinkDialog(
     var toMovement by remember { mutableStateOf(intersections.getOrNull(1)?.laneConnections?.firstOrNull()?.id.orEmpty()) }
     var share by remember { mutableStateOf("100") }
     var distance by remember { mutableStateOf("500") }
+    var travelSpeed by remember { mutableStateOf("30") }
     var validationError by remember { mutableStateOf<String?>(null) }
     val source = intersections.firstOrNull { it.id == fromNode }
     val target = intersections.firstOrNull { it.id == toNode }
@@ -483,6 +573,8 @@ private fun NetworkLinkDialog(
                 }, label = { Text("Доля передаваемого потока, %") }, singleLine = true)
                 OutlinedTextField(value = distance, onValueChange = { distance = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
                     label = { Text("Расстояние между узлами, м") }, singleLine = true)
+                OutlinedTextField(value = travelSpeed, onValueChange = { travelSpeed = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                    label = { Text("Расчётная скорость на участке, км/ч") }, singleLine = true)
                 validationError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
@@ -490,14 +582,17 @@ private fun NetworkLinkDialog(
             TextButton(onClick = {
                 val shareValue = share.replace(',', '.').toDoubleOrNull()
                 val distanceValue = distance.replace(',', '.').toDoubleOrNull()
+                val speedValue = travelSpeed.replace(',', '.').toDoubleOrNull()
                 if (source != null && target != null && source.id != target.id &&
                     fromMovement.isNotBlank() && toMovement.isNotBlank() &&
                     shareValue != null && shareValue > 0.0 && shareValue <= availableSharePercent + 1e-6 &&
-                    distanceValue != null && distanceValue in 1.0..100000.0) {
+                    distanceValue != null && distanceValue in 1.0..100000.0 &&
+                    speedValue != null && speedValue in 5.0..120.0) {
                     onAdd(NetworkTrafficLink(
                         fromIntersectionId = fromNode, fromMovementConnectionId = fromMovement,
                         toIntersectionId = toNode, toMovementConnectionId = toMovement,
-                        flowSharePercent = shareValue, distanceMeters = distanceValue
+                        flowSharePercent = shareValue, distanceMeters = distanceValue,
+                        travelSpeedKmh = speedValue
                     ))
                 } else {
                     validationError = if (shareValue != null && shareValue > availableSharePercent + 1e-6)
