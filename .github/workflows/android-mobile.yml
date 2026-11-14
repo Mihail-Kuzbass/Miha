@@ -63,11 +63,11 @@ jobs:
         run: gradle :app:testDebugUnitTest
 
       - name: Assemble debug APK
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_apk == true }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_apk == true) || github.event_name == 'push' }}
         run: gradle :app:assembleDebug
 
       - name: Upload APK
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_apk == true }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_apk == true) || github.event_name == 'push' }}
         uses: actions/upload-artifact@v4
         with:
           name: TrafficSignalStudio-Mobile-debug
