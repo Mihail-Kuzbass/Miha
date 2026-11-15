@@ -6,14 +6,17 @@ enum class SignalPlanIssueCode {
     NO_SIGNAL_PLAN, PLAN_DISABLED, NO_PHASES, DUPLICATE_PHASE_ID, EMPTY_PHASE,
     INVALID_GREEN_DURATION, INVALID_FLASHING_GREEN_DURATION, INVALID_YELLOW_DURATION, INVALID_ALL_RED_DURATION,
     INVALID_RED_YELLOW_DURATION,
-    UNKNOWN_CONNECTION, CONNECTION_ASSIGNED_MULTIPLE_PHASES, UNASSIGNED_CONNECTION
+    UNKNOWN_CONNECTION, CONNECTION_ASSIGNED_MULTIPLE_PHASES, UNASSIGNED_CONNECTION,
+    UNKNOWN_CROSSWALK, CROSSWALK_ASSIGNED_MULTIPLE_PHASES, UNASSIGNED_CROSSWALK,
+    PEDESTRIAN_VEHICLE_CONFLICT
 }
 
 data class SignalPlanDiagnostic(
     val code: SignalPlanIssueCode,
     val message: String,
     val phaseId: String? = null,
-    val connectionId: String? = null
+    val connectionId: String? = null,
+    val crosswalkId: String? = null
 )
 
 data class SignalPhaseWindow(
@@ -43,7 +46,11 @@ data class SignalPlanTimingReport(
             it.code == SignalPlanIssueCode.INVALID_RED_YELLOW_DURATION ||
             it.code == SignalPlanIssueCode.UNKNOWN_CONNECTION ||
             it.code == SignalPlanIssueCode.CONNECTION_ASSIGNED_MULTIPLE_PHASES ||
-            it.code == SignalPlanIssueCode.UNASSIGNED_CONNECTION
+            it.code == SignalPlanIssueCode.UNASSIGNED_CONNECTION ||
+            it.code == SignalPlanIssueCode.UNKNOWN_CROSSWALK ||
+            it.code == SignalPlanIssueCode.CROSSWALK_ASSIGNED_MULTIPLE_PHASES ||
+            it.code == SignalPlanIssueCode.UNASSIGNED_CROSSWALK ||
+            it.code == SignalPlanIssueCode.PEDESTRIAN_VEHICLE_CONFLICT
     }
 }
 
@@ -60,12 +67,15 @@ object SignalPlanTimingAnalyzer {
             diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.DUPLICATE_PHASE_ID, "Повторяется идентификатор фазы: " + id, phaseId = id)
         }
         val known = intersection.laneConnections.map { it.id }.toSet()
+        val knownCrosswalks = intersection.pedestrianCrossings.map { it.id }.toSet()
         val assignments = mutableMapOf<String, MutableList<String>>()
+        val crosswalkAssignments = mutableMapOf<String, MutableList<String>>()
+        val geometricConflicts = PedestrianConflictAnalyzer.analyze(intersection)
         val windows = mutableListOf<SignalPhaseWindow>()
         var cursor = 0
         plan.phases.forEach { phase ->
-            if (phase.greenConnectionIds.isEmpty()) diagnostics += SignalPlanDiagnostic(
-                SignalPlanIssueCode.EMPTY_PHASE, "Фаза «" + phase.name + "» не содержит разрешённых движений", phaseId = phase.id)
+            if (phase.greenConnectionIds.isEmpty() && phase.greenCrosswalkIds.isEmpty()) diagnostics += SignalPlanDiagnostic(
+                SignalPlanIssueCode.EMPTY_PHASE, "Фаза «" + phase.name + "» не содержит разрешённых движений или пешеходных переходов", phaseId = phase.id)
             if (phase.redYellowSeconds < 0 || phase.redYellowSeconds > 2) diagnostics += SignalPlanDiagnostic(
                 SignalPlanIssueCode.INVALID_RED_YELLOW_DURATION, "Красный с жёлтым должен длиться от 0 до 2 с", phaseId = phase.id)
             if (phase.greenSeconds <= 0) diagnostics += SignalPlanDiagnostic(
@@ -81,6 +91,21 @@ object SignalPlanTimingAnalyzer {
                 if (id !in known) diagnostics += SignalPlanDiagnostic(
                     SignalPlanIssueCode.UNKNOWN_CONNECTION, "Фаза «" + phase.name + "» ссылается на отсутствующее движение",
                     phaseId = phase.id, connectionId = id)
+            }
+            phase.greenCrosswalkIds.forEach { id ->
+                crosswalkAssignments.getOrPut(id) { mutableListOf() }.add(phase.id)
+                if (id !in knownCrosswalks) diagnostics += SignalPlanDiagnostic(
+                    SignalPlanIssueCode.UNKNOWN_CROSSWALK, "Фаза «" + phase.name + "» ссылается на отсутствующий пешеходный переход",
+                    phaseId = phase.id, crosswalkId = id)
+            }
+            geometricConflicts.filter { conflict ->
+                conflict.crossingId in phase.greenCrosswalkIds && conflict.connectionId in phase.greenConnectionIds
+            }.forEach { conflict ->
+                diagnostics += SignalPlanDiagnostic(
+                    SignalPlanIssueCode.PEDESTRIAN_VEHICLE_CONFLICT,
+                    "Опасное совмещение: переход " + conflict.crossingId + " пересекается с движением " + conflict.connectionId + ", которому в этой фазе также разрешён зелёный.",
+                    phaseId = phase.id, connectionId = conflict.connectionId, crosswalkId = conflict.crossingId
+                )
             }
             val redYellowStart = cursor
             val redYellowEnd = redYellowStart + phase.redYellowSeconds.coerceAtLeast(0)
@@ -102,6 +127,14 @@ object SignalPlanTimingAnalyzer {
         known.filter { it !in assignments }.forEach { id ->
             diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.UNASSIGNED_CONNECTION,
                 "Для движения не назначена ни одна фаза", connectionId = id)
+        }
+        crosswalkAssignments.filterValues { it.size > 1 }.keys.forEach { id ->
+            diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.CROSSWALK_ASSIGNED_MULTIPLE_PHASES,
+                "Пешеходный переход назначен более чем в одну фазу", crosswalkId = id)
+        }
+        knownCrosswalks.filter { it !in crosswalkAssignments }.forEach { id ->
+            diagnostics += SignalPlanDiagnostic(SignalPlanIssueCode.UNASSIGNED_CROSSWALK,
+                "Для пешеходного перехода не назначена ни одна разрешающая фаза", crosswalkId = id)
         }
         return SignalPlanTimingReport(cursor, windows, diagnostics)
     }
