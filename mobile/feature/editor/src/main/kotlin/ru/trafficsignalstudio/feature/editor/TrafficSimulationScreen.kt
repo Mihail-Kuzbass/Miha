@@ -630,6 +630,14 @@ private fun SignalPhaseStatusCard(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+            intersection.pedestrianCrossings.forEach { crossing ->
+                val pedestrianGreen = state == "Зелёный" && crossing.id in phase?.greenCrosswalkIds.orEmpty()
+                Text(
+                    "${crossing.name}: пешеходам ${if (pedestrianGreen) "зелёный" else "красный"}",
+                    color = if (pedestrianGreen) Color(0xFF43A047) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             if (cycleLengthSeconds > 0) {
                 Text("Положение в цикле: ${cycleTime.toInt()} / $cycleLengthSeconds с",
                     style = MaterialTheme.typography.labelSmall)
