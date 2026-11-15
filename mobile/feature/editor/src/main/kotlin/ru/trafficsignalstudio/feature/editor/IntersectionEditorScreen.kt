@@ -207,7 +207,7 @@ fun IntersectionEditorScreen(
                         vehicleModel = selectedVehicleModel,
                         pendingPoints = pendingPoints,
                         drawingTool = drawingTool,
-                        onAddPoint = { point -> pendingPoints.add(snapToNetwork(point, intersection)) },
+                        onAddPoint = { point -> pendingPoints.add(if (crossingDrawingMode) point else snapToNetwork(point, intersection)) },
                         zoom = viewportZoom, pan = viewportPan, editMode = editMode,
                         selectedSegmentId = selectedRoadSegmentId,
                         onViewportChange = { z, p -> viewportZoom = z; viewportPan = p },
@@ -363,7 +363,7 @@ fun IntersectionEditorScreen(
                                 ))
                                 pendingPoints.clear()
                             }
-                        }, enabled = if (islandDrawingMode || drawingTool == DrawingTool.ARC) pendingPoints.size >= 3 else pendingPoints.size >= 2) { Text(when {
+                        }, enabled = if (crossingDrawingMode) pendingPoints.size >= 2 else if (islandDrawingMode || drawingTool == DrawingTool.ARC) pendingPoints.size >= 3 else pendingPoints.size >= 2) { Text(when {
                             crossingDrawingMode -> "Создать переход"
                             islandDrawingMode -> "Завершить островок"
                             else -> "Завершить линию"
