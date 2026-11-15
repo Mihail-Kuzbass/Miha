@@ -1,7 +1,6 @@
 package ru.trafficsignalstudio.geometry
 
 import ru.trafficsignalstudio.model.Intersection
-import kotlin.math.ceil
 import kotlin.math.max
 
 data class PedestrianFlowDemand(
@@ -93,9 +92,14 @@ object PedestrianSimulationEngine {
         }
         if (!timing.isValid) diagnostics += "В плане есть ошибки назначения сигналов; пешеходный выпуск ограничен только корректно назначенными фазами."
 
+        val unsafePedestrianPhases = timing.diagnostics
+            .filter { it.code == SignalPlanIssueCode.PEDESTRIAN_VEHICLE_CONFLICT ||
+                it.code == SignalPlanIssueCode.CROSSWALK_ASSIGNED_MULTIPLE_PHASES }
+            .mapNotNull { it.phaseId }.toSet()
         val greenWindows = validDemands.associate { demand ->
             demand.crossingId to timing.phaseWindows.filter { window ->
-                window.phaseId in phasesByCrossing[demand.crossingId].orEmpty()
+                window.phaseId in phasesByCrossing[demand.crossingId].orEmpty() &&
+                    window.phaseId !in unsafePedestrianPhases
             }
         }
         val waiting = validDemands.associate { it.crossingId to ArrayDeque<Agent>() }
@@ -104,6 +108,7 @@ object PedestrianSimulationEngine {
             demand.crossingId to if (demand.pedestriansPerHour > 0.0) 3600.0 / demand.pedestriansPerHour else Double.POSITIVE_INFINITY
         }.toMutableMap()
         val totalDelayByCrossing = mutableMapOf<String, Double>()
+        val lastEntryTime = validDemands.associate { it.crossingId to Double.NEGATIVE_INFINITY }.toMutableMap()
         var nextId = 1L
         var totalArrivals = 0
         var totalCompleted = 0
@@ -148,12 +153,14 @@ object PedestrianSimulationEngine {
                 val walkers = active.getValue(demand.crossingId)
                 val remainingGreen = remainingPedestrianGreen(demand.crossingId, time)
                 val requiredClearance = crossing.crossingLengthMeters / demand.walkingSpeedMetersPerSecond + 1.0
-                while (queue.isNotEmpty() && remainingGreen + 1e-9 >= requiredClearance) {
+                if (queue.isNotEmpty() && remainingGreen + 1e-9 >= requiredClearance &&
+                    time - (lastEntryTime[demand.crossingId] ?: Double.NEGATIVE_INFINITY) >= 0.8) {
                     val pedestrian = queue.removeFirst()
                     pedestrian.waiting = false
                     totalDelayByCrossing[demand.crossingId] =
                         (totalDelayByCrossing[demand.crossingId] ?: 0.0) + (time - pedestrian.arrivalTime).coerceAtLeast(0.0)
                     walkers += pedestrian
+                    lastEntryTime[demand.crossingId] = time
                 }
                 walkers.forEach { pedestrian ->
                     pedestrian.progress += pedestrian.speed * step / crossing.crossingLengthMeters
