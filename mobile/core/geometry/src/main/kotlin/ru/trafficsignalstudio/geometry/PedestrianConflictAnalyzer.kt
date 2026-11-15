@@ -21,8 +21,10 @@ object PedestrianConflictAnalyzer {
         return buildList {
             intersection.pedestrianCrossings.forEach { crossing ->
                 trajectories.forEach { trajectory ->
+                    val conflictClearance = crossing.widthMeters / 2.0 + trajectory.vehicleWidthMeters / 2.0
                     val intersects = trajectory.points.zipWithNext().any { (a, b) ->
-                        segmentsIntersect(a, b, crossing.start, crossing.end)
+                        segmentsIntersect(a, b, crossing.start, crossing.end) ||
+                            segmentDistance(a, b, crossing.start, crossing.end) <= conflictClearance
                     }
                     if (intersects) add(PedestrianVehicleConflict(crossing.id, trajectory.connectionId))
                 }
@@ -39,6 +41,25 @@ object PedestrianConflictAnalyzer {
             p.xMeters <= maxOf(a.xMeters, b.xMeters) + EPS &&
             p.yMeters >= minOf(a.yMeters, b.yMeters) - EPS &&
             p.yMeters <= maxOf(a.yMeters, b.yMeters) + EPS
+
+    private fun pointToSegmentDistance(point: Point2D, a: Point2D, b: Point2D): Double {
+        val dx = b.xMeters - a.xMeters
+        val dy = b.yMeters - a.yMeters
+        val lengthSquared = dx * dx + dy * dy
+        if (lengthSquared <= EPS) return kotlin.math.hypot(point.xMeters - a.xMeters, point.yMeters - a.yMeters)
+        val t = (((point.xMeters - a.xMeters) * dx + (point.yMeters - a.yMeters) * dy) / lengthSquared).coerceIn(0.0, 1.0)
+        val nearestX = a.xMeters + t * dx
+        val nearestY = a.yMeters + t * dy
+        return kotlin.math.hypot(point.xMeters - nearestX, point.yMeters - nearestY)
+    }
+
+    private fun segmentDistance(a: Point2D, b: Point2D, c: Point2D, d: Point2D): Double =
+        minOf(
+            pointToSegmentDistance(a, c, d),
+            pointToSegmentDistance(b, c, d),
+            pointToSegmentDistance(c, a, b),
+            pointToSegmentDistance(d, a, b)
+        )
 
     private fun segmentsIntersect(a: Point2D, b: Point2D, c: Point2D, d: Point2D): Boolean {
         val o1 = orientation(a, b, c)
