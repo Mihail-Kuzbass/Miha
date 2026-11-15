@@ -241,6 +241,7 @@ object IntersectionGeometryEditor {
             val assignedIds = plan.phases.flatMap { it.greenConnectionIds }
             val assignedCrosswalkIds = plan.phases.flatMap { it.greenCrosswalkIds }
             val crosswalkIds = intersection.pedestrianCrossings.map { it.id }.toSet()
+            val pedestrianVehicleConflicts = PedestrianConflictAnalyzer.analyze(intersection)
             if (plan.phases.map { it.id }.distinct().size != plan.phases.size) add("Идентификаторы светофорных фаз должны быть уникальными")
             plan.phases.forEach { phase ->
                 if (phase.name.isBlank()) add("У светофорной фазы отсутствует название")
@@ -249,6 +250,11 @@ object IntersectionGeometryEditor {
                 if (phase.greenConnectionIds.isEmpty() && phase.greenCrosswalkIds.isEmpty()) add("Фаза «${phase.name}» не содержит разрешённых движений или пешеходных переходов")
                 if (phase.greenConnectionIds.any { it !in connectionIds }) add("Фаза «${phase.name}» ссылается на несуществующую связь полос")
                 if (phase.greenCrosswalkIds.any { it !in crosswalkIds }) add("Фаза «${phase.name}» ссылается на несуществующий пешеходный переход")
+                pedestrianVehicleConflicts.filter { conflict ->
+                    conflict.crossingId in phase.greenCrosswalkIds && conflict.connectionId in phase.greenConnectionIds
+                }.forEach { conflict ->
+                    add("Фаза «${phase.name}» одновременно разрешает пешеходный переход и пересекающееся движение ${conflict.connectionId}")
+                }
             }
             if (assignedIds.size != assignedIds.distinct().size) add("Одно движение назначено зелёным сразу в нескольких фазах")
             if (assignedCrosswalkIds.size != assignedCrosswalkIds.distinct().size) add("Один пешеходный переход назначен зелёным сразу в нескольких фазах")
