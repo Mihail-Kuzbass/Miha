@@ -99,7 +99,9 @@ data class SignalPhase(
     /** Permissive flashing-green interval before yellow. */
     val flashingGreenSeconds: Int = 3,
     val yellowSeconds: Int = 3,
-    val allRedSeconds: Int = 1
+    val allRedSeconds: Int = 1,
+    /** Pedestrian crossings receiving a permissive signal during this phase. */
+    val greenCrosswalkIds: Set<String> = emptySet()
 )
 
 data class SignalPlan(
