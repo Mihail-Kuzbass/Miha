@@ -5,6 +5,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.trafficsignalstudio.model.Intersection
 import ru.trafficsignalstudio.model.IntersectionType
+import ru.trafficsignalstudio.model.Approach
+import ru.trafficsignalstudio.model.Lane
+import ru.trafficsignalstudio.model.LaneConnection
+import ru.trafficsignalstudio.model.LaneFlowDirection
 import ru.trafficsignalstudio.model.PedestrianCrossing
 import ru.trafficsignalstudio.model.Point2D
 import ru.trafficsignalstudio.model.SignalPhase
@@ -92,4 +96,63 @@ class PedestrianSimulationEngineTest {
         assertTrue(report.diagnostics.toString(), report.isValid)
         assertEquals(1, report.phaseWindows.size)
     }
+    @Test
+    fun samePhaseVehicleAndPedestrianGreenIsRejectedWhenPathsIntersect() {
+        val crossing = PedestrianCrossing(
+            id = "crossing-conflict",
+            name = "Переход через основную дорогу",
+            start = Point2D(-5.0, 0.0),
+            end = Point2D(5.0, 0.0),
+            widthMeters = 4.0
+        )
+        val north = Approach(
+            id = "north",
+            name = "Север",
+            headingDegrees = 0.0,
+            lanes = listOf(Lane(id = "north-in", index = 1))
+        )
+        val south = Approach(
+            id = "south",
+            name = "Юг",
+            headingDegrees = 180.0,
+            lanes = listOf(Lane(id = "south-out", index = 1,
+                flowDirection = LaneFlowDirection.OUT_OF_INTERSECTION))
+        )
+        val intersection = Intersection(
+            id = "conflict-test",
+            name = "Проверка конфликта",
+            type = IntersectionType.CUSTOM,
+            approaches = listOf(north, south),
+            laneConnections = listOf(LaneConnection(
+                id = "north-south",
+                fromApproachId = north.id,
+                fromLaneId = "north-in",
+                toApproachId = south.id,
+                toLaneId = "south-out"
+            )),
+            signalPlan = SignalPlan(phases = listOf(SignalPhase(
+                id = "shared-phase",
+                name = "Общая фаза",
+                greenConnectionIds = setOf("north-south"),
+                greenSeconds = 20,
+                redYellowSeconds = 0,
+                flashingGreenSeconds = 0,
+                yellowSeconds = 3,
+                allRedSeconds = 1,
+                greenCrosswalkIds = setOf(crossing.id)
+            ))),
+            pedestrianCrossings = listOf(crossing)
+        )
+        assertTrue(PedestrianConflictAnalyzer.analyze(intersection).any {
+            it.crossingId == crossing.id && it.connectionId == "north-south"
+        })
+        val report = SignalPlanTimingAnalyzer.analyze(intersection)
+        assertTrue(report.diagnostics.toString(), report.diagnostics.any {
+            it.code == SignalPlanIssueCode.PEDESTRIAN_VEHICLE_CONFLICT
+        })
+        assertTrue(IntersectionGeometryEditor.validate(intersection).any {
+            it.contains("одновременно разрешает пешеходный переход")
+        })
+    }
+
 }
