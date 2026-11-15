@@ -547,38 +547,7 @@ fun IntersectionEditorScreen(
                         Text("Сначала создайте связи въездных и выездных полос — по ним строятся траектории поворотов.")
                     } else {
                         Text("Назначение движений фазам", style = MaterialTheme.typography.titleSmall)
-                        intersection.pedestrianCrossings.forEach { crossing ->
-            val dx = crossing.end.xMeters - crossing.start.xMeters
-            val dy = crossing.end.yMeters - crossing.start.yMeters
-            val length = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001)
-            val px = -dy / length * crossing.widthMeters / 2.0
-            val py = dx / length * crossing.widthMeters / 2.0
-            val corners = listOf(
-                Point2D(crossing.start.xMeters + px, crossing.start.yMeters + py),
-                Point2D(crossing.end.xMeters + px, crossing.end.yMeters + py),
-                Point2D(crossing.end.xMeters - px, crossing.end.yMeters - py),
-                Point2D(crossing.start.xMeters - px, crossing.start.yMeters - py)
-            )
-            val band = Path().apply {
-                moveTo(center.x + corners.first().xMeters.toFloat() * scale, center.y - corners.first().yMeters.toFloat() * scale)
-                corners.drop(1).forEach { point -> lineTo(center.x + point.xMeters.toFloat() * scale, center.y - point.yMeters.toFloat() * scale) }
-                close()
-            }
-            drawPath(band, Color(0xFF263238).copy(alpha = 0.75f))
-            for (stripe in 0 until 7) {
-                val t = (stripe + 0.5) / 7.0
-                val cx = crossing.start.xMeters + dx * t
-                val cy = crossing.start.yMeters + dy * t
-                val a = Offset(center.x + (cx + px).toFloat() * scale, center.y - (cy + py).toFloat() * scale)
-                val b = Offset(center.x + (cx - px).toFloat() * scale, center.y - (cy - py).toFloat() * scale)
-                drawLine(Color.White, a, b, strokeWidth = (0.28f * scale).coerceAtLeast(2f), cap = StrokeCap.Butt)
-            }
-            val midpoint = Offset(center.x + ((crossing.start.xMeters + crossing.end.xMeters) / 2.0).toFloat() * scale,
-                center.y - ((crossing.start.yMeters + crossing.end.yMeters) / 2.0).toFloat() * scale)
-            drawCircle(Color(0xFF42A5F5), 4f, midpoint)
-        }
-
-        movementTrajectories.forEach { trajectory ->
+                        movementTrajectories.forEach { trajectory ->
                             val from = intersection.approaches.firstOrNull { it.id == trajectory.fromApproachId }
                             val fromLane = from?.lanes?.firstOrNull { it.id == trajectory.fromLaneId }
                             val to = intersection.approaches.firstOrNull { it.id == trajectory.toApproachId }
@@ -595,7 +564,31 @@ fun IntersectionEditorScreen(
                                     style = MaterialTheme.typography.bodySmall)
                                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    intersection.signalPlan?.phases.orEmpty().forEach { phase ->
+                                    if (intersection.pedestrianCrossings.isNotEmpty()) {
+                        Text("Назначение пешеходных переходов фазам", style = MaterialTheme.typography.titleSmall)
+                        intersection.pedestrianCrossings.forEach { crossing ->
+                            Text(crossing.name, style = MaterialTheme.typography.bodySmall)
+                            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                intersection.signalPlan?.phases.orEmpty().forEach { phase ->
+                                    val assigned = crossing.id in phase.greenCrosswalkIds
+                                    if (assigned) Button(onClick = {
+                                        val plan = intersection.signalPlan ?: SignalPlan()
+                                        updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map { item ->
+                                            if (item.id == phase.id) item.copy(greenCrosswalkIds = item.greenCrosswalkIds - crossing.id) else item
+                                        })))
+                                    }) { Text("${phase.name} ✓") }
+                                    else OutlinedButton(onClick = {
+                                        val plan = intersection.signalPlan ?: SignalPlan()
+                                        updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map { item ->
+                                            item.copy(greenCrosswalkIds = if (item.id == phase.id) item.greenCrosswalkIds + crossing.id
+                                                else item.greenCrosswalkIds - crossing.id)
+                                        })))
+                                    }) { Text(phase.name) }
+                                }
+                            }
+                        }
+                    }
+                    intersection.signalPlan?.phases.orEmpty().forEach { phase ->
                                         val assigned = trajectory.connectionId in phase.greenConnectionIds
                                         if (assigned) Button(onClick = {
                                             val plan = intersection.signalPlan ?: SignalPlan()
@@ -1285,6 +1278,37 @@ private fun IntersectionGeometryPreview(
                     Offset(center.x - half, center.y - junctionHalf - 16f),
                     Offset(center.x + half, center.y - junctionHalf - 16f), 4f)
             }
+        }
+
+        intersection.pedestrianCrossings.forEach { crossing ->
+            val dx = crossing.end.xMeters - crossing.start.xMeters
+            val dy = crossing.end.yMeters - crossing.start.yMeters
+            val length = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001)
+            val px = -dy / length * crossing.widthMeters / 2.0
+            val py = dx / length * crossing.widthMeters / 2.0
+            val corners = listOf(
+                Point2D(crossing.start.xMeters + px, crossing.start.yMeters + py),
+                Point2D(crossing.end.xMeters + px, crossing.end.yMeters + py),
+                Point2D(crossing.end.xMeters - px, crossing.end.yMeters - py),
+                Point2D(crossing.start.xMeters - px, crossing.start.yMeters - py)
+            )
+            val band = Path().apply {
+                moveTo(center.x + corners.first().xMeters.toFloat() * scale, center.y - corners.first().yMeters.toFloat() * scale)
+                corners.drop(1).forEach { point -> lineTo(center.x + point.xMeters.toFloat() * scale, center.y - point.yMeters.toFloat() * scale) }
+                close()
+            }
+            drawPath(band, Color(0xFF263238).copy(alpha = 0.75f))
+            for (stripe in 0 until 7) {
+                val t = (stripe + 0.5) / 7.0
+                val cx = crossing.start.xMeters + dx * t
+                val cy = crossing.start.yMeters + dy * t
+                val a = Offset(center.x + (cx + px).toFloat() * scale, center.y - (cy + py).toFloat() * scale)
+                val b = Offset(center.x + (cx - px).toFloat() * scale, center.y - (cy - py).toFloat() * scale)
+                drawLine(Color.White, a, b, strokeWidth = (0.28f * scale).coerceAtLeast(2f), cap = StrokeCap.Butt)
+            }
+            val midpoint = Offset(center.x + ((crossing.start.xMeters + crossing.end.xMeters) / 2.0).toFloat() * scale,
+                center.y - ((crossing.start.yMeters + crossing.end.yMeters) / 2.0).toFloat() * scale)
+            drawCircle(Color(0xFF42A5F5), 4f, midpoint)
         }
 
         movementTrajectories.forEach { trajectory ->
