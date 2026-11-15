@@ -564,7 +564,27 @@ fun IntersectionEditorScreen(
                                     style = MaterialTheme.typography.bodySmall)
                                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    if (intersection.pedestrianCrossings.isNotEmpty()) {
+                    intersection.signalPlan?.phases.orEmpty().forEach { phase ->
+                                        val assigned = trajectory.connectionId in phase.greenConnectionIds
+                                        if (assigned) Button(onClick = {
+                                            val plan = intersection.signalPlan ?: SignalPlan()
+                                            updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map {
+                                                if (it.id == phase.id) it.copy(greenConnectionIds = it.greenConnectionIds - trajectory.connectionId) else it
+                                            })))
+                                        }) { Text("${phase.name} ✓") }
+                                        else OutlinedButton(onClick = {
+                                            val plan = intersection.signalPlan ?: SignalPlan()
+                                            updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map {
+                                                it.copy(greenConnectionIds = if (it.id == phase.id) it.greenConnectionIds + trajectory.connectionId
+                                                    else it.greenConnectionIds - trajectory.connectionId)
+                                            })))
+                                        }) { Text(phase.name) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (intersection.pedestrianCrossings.isNotEmpty()) {
                         Text("Назначение пешеходных переходов фазам", style = MaterialTheme.typography.titleSmall)
                         intersection.pedestrianCrossings.forEach { crossing ->
                             Text(crossing.name, style = MaterialTheme.typography.bodySmall)
@@ -584,26 +604,6 @@ fun IntersectionEditorScreen(
                                                 else item.greenCrosswalkIds - crossing.id)
                                         })))
                                     }) { Text(phase.name) }
-                                }
-                            }
-                        }
-                    }
-                    intersection.signalPlan?.phases.orEmpty().forEach { phase ->
-                                        val assigned = trajectory.connectionId in phase.greenConnectionIds
-                                        if (assigned) Button(onClick = {
-                                            val plan = intersection.signalPlan ?: SignalPlan()
-                                            updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map {
-                                                if (it.id == phase.id) it.copy(greenConnectionIds = it.greenConnectionIds - trajectory.connectionId) else it
-                                            })))
-                                        }) { Text("${phase.name} ✓") }
-                                        else OutlinedButton(onClick = {
-                                            val plan = intersection.signalPlan ?: SignalPlan()
-                                            updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map {
-                                                it.copy(greenConnectionIds = if (it.id == phase.id) it.greenConnectionIds + trajectory.connectionId
-                                                    else it.greenConnectionIds - trajectory.connectionId)
-                                            })))
-                                        }) { Text(phase.name) }
-                                    }
                                 }
                             }
                         }
