@@ -68,6 +68,7 @@ import ru.trafficsignalstudio.model.RoadSegment
 import ru.trafficsignalstudio.model.RoadSegmentKind
 import ru.trafficsignalstudio.model.RoadJunctionNode
 import ru.trafficsignalstudio.model.SafetyIsland
+import ru.trafficsignalstudio.model.PedestrianCrossing
 import ru.trafficsignalstudio.model.VehicleModel
 import ru.trafficsignalstudio.model.VehicleModelCatalog
 import ru.trafficsignalstudio.model.VehicleClass
@@ -114,6 +115,8 @@ fun IntersectionEditorScreen(
     var viewportPan by remember(intersection?.id) { mutableStateOf(Offset.Zero) }
     var selectedRoadSegmentId by remember(intersection?.id) { mutableStateOf<String?>(null) }
     var islandDrawingMode by remember(intersection?.id) { mutableStateOf(false) }
+    var crossingDrawingMode by remember(intersection?.id) { mutableStateOf(false) }
+    var crossingWidthInput by remember(intersection?.id) { mutableStateOf("4.0") }
     var sourceLaneKey by remember(intersection?.id) { mutableStateOf<String?>(null) }
     var targetLaneKey by remember(intersection?.id) { mutableStateOf<String?>(null) }
     var sourceLaneMenuExpanded by remember(intersection?.id) { mutableStateOf(false) }
@@ -274,7 +277,7 @@ fun IntersectionEditorScreen(
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Редактор геометрии", style = MaterialTheme.typography.titleMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (!editMode) Button(onClick = { editMode = true; pendingPoints.clear(); islandDrawingMode = false }) { Text("Редактировать") }
+                        if (!editMode) Button(onClick = { editMode = true; pendingPoints.clear(); islandDrawingMode = false; crossingDrawingMode = false }) { Text("Редактировать") }
                         else Button(onClick = { editMode = false }) { Text("Рисовать") }
                         OutlinedButton(onClick = { viewportZoom = (viewportZoom / 1.25f).coerceAtLeast(0.35f) }) { Text("−") }
                         Text("${(viewportZoom * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
@@ -282,9 +285,10 @@ fun IntersectionEditorScreen(
                         OutlinedButton(onClick = { viewportZoom = 1f; viewportPan = Offset.Zero }) { Text("Сброс вида") }
                     }
                     if (!editMode) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { islandDrawingMode = !islandDrawingMode; pendingPoints.clear() }) { Text(if (islandDrawingMode) "Рисуем островок" else "Добавить островок") }
+                        OutlinedButton(onClick = { islandDrawingMode = !islandDrawingMode; crossingDrawingMode = false; pendingPoints.clear() }) { Text(if (islandDrawingMode) "Рисуем островок" else "Добавить островок") }
+                        OutlinedButton(onClick = { crossingDrawingMode = !crossingDrawingMode; islandDrawingMode = false; pendingPoints.clear() }) { Text(if (crossingDrawingMode) "Рисуем переход" else "+ Пешеходный переход") }
                     }
-                    if (!editMode && !islandDrawingMode) Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    if (!editMode && !islandDrawingMode && !crossingDrawingMode) Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         DrawingTool.values().forEach { tool ->
                             if (drawingTool == tool) {
@@ -294,8 +298,21 @@ fun IntersectionEditorScreen(
                             }
                         }
                     }
-                    if (!editMode) Text(if (islandDrawingMode) "Поставьте минимум 3 точки контура островка." else "Точки: ${pendingPoints.size}. Нажимайте на поле, чтобы задать трассу.")
+                    if (!editMode) Text(when {
+                        islandDrawingMode -> "Поставьте минимум 3 точки контура островка."
+                        crossingDrawingMode -> "Укажите две точки: от одного края проезжей части до противоположного."
+                        else -> "Точки: ${pendingPoints.size}. Нажимайте на поле, чтобы задать трассу."
+                    })
                     else Text("Коснитесь дороги для выбора. Перетаскивайте узлы; жест двумя пальцами — масштаб и панорамирование.")
+                    if (!editMode && crossingDrawingMode) {
+                        OutlinedTextField(
+                            value = crossingWidthInput,
+                            onValueChange = { crossingWidthInput = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                            label = { Text("Ширина перехода вдоль дороги, м") },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                    }
                     if (!editMode) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedButton(onClick = { if (pendingPoints.isNotEmpty()) pendingPoints.removeAt(pendingPoints.lastIndex) },
                             enabled = pendingPoints.isNotEmpty()) { Text("Отменить точку") }
@@ -303,7 +320,18 @@ fun IntersectionEditorScreen(
                             Text("Очистить")
                         }
                         Button(onClick = {
-                            if (islandDrawingMode && pendingPoints.size >= 3) {
+                            if (crossingDrawingMode && pendingPoints.size >= 2) {
+                                val width = crossingWidthInput.replace(',', '.').toDoubleOrNull()
+                                if (width != null && width in 2.0..12.0) {
+                                    val crossing = PedestrianCrossing(
+                                        name = "Переход ${intersection.pedestrianCrossings.size + 1}",
+                                        start = pendingPoints.first(), end = pendingPoints.last(), widthMeters = width
+                                    )
+                                    updateIntersection(intersection.copy(pedestrianCrossings = intersection.pedestrianCrossings + crossing))
+                                    pendingPoints.clear()
+                                    crossingDrawingMode = false
+                                }
+                            } else if (islandDrawingMode && pendingPoints.size >= 3) {
                                 val island = SafetyIsland(name = "Островок ${intersection.safetyIslands.size + 1}", boundary = pendingPoints.toList())
                                 updateIntersection(intersection.copy(safetyIslands = intersection.safetyIslands + island))
                                 pendingPoints.clear()
@@ -335,9 +363,31 @@ fun IntersectionEditorScreen(
                                 ))
                                 pendingPoints.clear()
                             }
-                        }, enabled = if (islandDrawingMode || drawingTool == DrawingTool.ARC) pendingPoints.size >= 3 else pendingPoints.size >= 2) { Text(if (islandDrawingMode) "Завершить островок" else "Завершить линию") }
+                        }, enabled = if (islandDrawingMode || drawingTool == DrawingTool.ARC) pendingPoints.size >= 3 else pendingPoints.size >= 2) { Text(when {
+                            crossingDrawingMode -> "Создать переход"
+                            islandDrawingMode -> "Завершить островок"
+                            else -> "Завершить линию"
+                        }) }
                     }
-                    if (!editMode) Text("Для дуги задайте 3 точки: начало, контрольную и конец. Мост рисуется на верхнем уровне.")
+                    if (!editMode && !crossingDrawingMode) Text("Для дуги задайте 3 точки: начало, контрольную и конец. Мост рисуется на верхнем уровне.")
+                    if (intersection.pedestrianCrossings.isNotEmpty()) {
+                        Text("Пешеходные переходы", style = MaterialTheme.typography.titleSmall)
+                        intersection.pedestrianCrossings.forEach { crossing ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text("${crossing.name} · ${"%.1f".format(crossing.crossingLengthMeters)} × ${"%.1f".format(crossing.widthMeters)} м",
+                                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                                OutlinedButton(onClick = {
+                                    updateIntersection(intersection.copy(
+                                        pedestrianCrossings = intersection.pedestrianCrossings.filterNot { it.id == crossing.id },
+                                        signalPlan = intersection.signalPlan?.copy(phases = intersection.signalPlan.phases.map { phase ->
+                                            phase.copy(greenCrosswalkIds = phase.greenCrosswalkIds - crossing.id)
+                                        })
+                                    ))
+                                }) { Text("Удалить") }
+                            }
+                        }
+                    }
                     val selectedSegment = intersection.roadSegments.firstOrNull { it.id == selectedRoadSegmentId }
                     if (editMode && selectedSegment != null) {
                         Text("Выбрано: ${selectedSegment.name}", style = MaterialTheme.typography.titleSmall)
@@ -497,7 +547,38 @@ fun IntersectionEditorScreen(
                         Text("Сначала создайте связи въездных и выездных полос — по ним строятся траектории поворотов.")
                     } else {
                         Text("Назначение движений фазам", style = MaterialTheme.typography.titleSmall)
-                        movementTrajectories.forEach { trajectory ->
+                        intersection.pedestrianCrossings.forEach { crossing ->
+            val dx = crossing.end.xMeters - crossing.start.xMeters
+            val dy = crossing.end.yMeters - crossing.start.yMeters
+            val length = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001)
+            val px = -dy / length * crossing.widthMeters / 2.0
+            val py = dx / length * crossing.widthMeters / 2.0
+            val corners = listOf(
+                Point2D(crossing.start.xMeters + px, crossing.start.yMeters + py),
+                Point2D(crossing.end.xMeters + px, crossing.end.yMeters + py),
+                Point2D(crossing.end.xMeters - px, crossing.end.yMeters - py),
+                Point2D(crossing.start.xMeters - px, crossing.start.yMeters - py)
+            )
+            val band = Path().apply {
+                moveTo(center.x + corners.first().xMeters.toFloat() * scale, center.y - corners.first().yMeters.toFloat() * scale)
+                corners.drop(1).forEach { point -> lineTo(center.x + point.xMeters.toFloat() * scale, center.y - point.yMeters.toFloat() * scale) }
+                close()
+            }
+            drawPath(band, Color(0xFF263238).copy(alpha = 0.75f))
+            for (stripe in 0 until 7) {
+                val t = (stripe + 0.5) / 7.0
+                val cx = crossing.start.xMeters + dx * t
+                val cy = crossing.start.yMeters + dy * t
+                val a = Offset(center.x + (cx + px).toFloat() * scale, center.y - (cy + py).toFloat() * scale)
+                val b = Offset(center.x + (cx - px).toFloat() * scale, center.y - (cy - py).toFloat() * scale)
+                drawLine(Color.White, a, b, strokeWidth = (0.28f * scale).coerceAtLeast(2f), cap = StrokeCap.Butt)
+            }
+            val midpoint = Offset(center.x + ((crossing.start.xMeters + crossing.end.xMeters) / 2.0).toFloat() * scale,
+                center.y - ((crossing.start.yMeters + crossing.end.yMeters) / 2.0).toFloat() * scale)
+            drawCircle(Color(0xFF42A5F5), 4f, midpoint)
+        }
+
+        movementTrajectories.forEach { trajectory ->
                             val from = intersection.approaches.firstOrNull { it.id == trajectory.fromApproachId }
                             val fromLane = from?.lanes?.firstOrNull { it.id == trajectory.fromLaneId }
                             val to = intersection.approaches.firstOrNull { it.id == trajectory.toApproachId }
@@ -530,6 +611,30 @@ fun IntersectionEditorScreen(
                                             })))
                                         }) { Text(phase.name) }
                                     }
+                                }
+                            }
+                        }
+                    }
+                    if (intersection.pedestrianCrossings.isNotEmpty()) {
+                        Text("Назначение пешеходных переходов фазам", style = MaterialTheme.typography.titleSmall)
+                        intersection.pedestrianCrossings.forEach { crossing ->
+                            Text(crossing.name, style = MaterialTheme.typography.bodySmall)
+                            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                intersection.signalPlan?.phases.orEmpty().forEach { phase ->
+                                    val assigned = crossing.id in phase.greenCrosswalkIds
+                                    if (assigned) Button(onClick = {
+                                        val plan = intersection.signalPlan ?: SignalPlan()
+                                        updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map { item ->
+                                            if (item.id == phase.id) item.copy(greenCrosswalkIds = item.greenCrosswalkIds - crossing.id) else item
+                                        })))
+                                    }) { Text("${phase.name} ✓") }
+                                    else OutlinedButton(onClick = {
+                                        val plan = intersection.signalPlan ?: SignalPlan()
+                                        updateIntersection(intersection.copy(signalPlan = plan.copy(phases = plan.phases.map { item ->
+                                            item.copy(greenCrosswalkIds = if (item.id == phase.id) item.greenCrosswalkIds + crossing.id
+                                                else item.greenCrosswalkIds - crossing.id)
+                                        })))
+                                    }) { Text(phase.name) }
                                 }
                             }
                         }
