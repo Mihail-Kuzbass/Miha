@@ -21,6 +21,7 @@ import ru.trafficsignalstudio.model.SignalPhase
 import ru.trafficsignalstudio.model.SignalPlan
 import ru.trafficsignalstudio.model.RoadJunctionNode
 import ru.trafficsignalstudio.model.SafetyIsland
+import ru.trafficsignalstudio.model.PedestrianCrossing
 import java.io.File
 
 class ProjectJsonStore(context: Context) {
@@ -127,6 +128,17 @@ class ProjectJsonStore(context: Context) {
                                 })
                             }
                         })
+                        put("pedestrianCrossings", JSONArray().apply {
+                            intersection.pedestrianCrossings.forEach { crossing ->
+                                put(JSONObject().apply {
+                                    put("id", crossing.id)
+                                    put("name", crossing.name)
+                                    put("start", JSONObject().put("x", crossing.start.xMeters).put("y", crossing.start.yMeters))
+                                    put("end", JSONObject().put("x", crossing.end.xMeters).put("y", crossing.end.yMeters))
+                                    put("widthMeters", crossing.widthMeters)
+                                })
+                            }
+                        })
                         put("laneConnections", JSONArray().apply {
                             intersection.laneConnections.forEach { connection ->
                                 put(JSONObject().apply {
@@ -147,6 +159,7 @@ class ProjectJsonStore(context: Context) {
                                             put("id", phase.id)
                                             put("name", phase.name)
                                             put("greenConnectionIds", JSONArray(phase.greenConnectionIds.toList()))
+                                            put("greenCrosswalkIds", JSONArray(phase.greenCrosswalkIds.toList()))
                                             put("greenSeconds", phase.greenSeconds)
                                             put("redYellowSeconds", phase.redYellowSeconds)
                                             put("flashingGreenSeconds", phase.flashingGreenSeconds)
@@ -295,6 +308,21 @@ class ProjectJsonStore(context: Context) {
                     }
                 )
             }
+            val crossingsJson = item.optJSONArray("pedestrianCrossings") ?: JSONArray()
+            val pedestrianCrossings = (0 until crossingsJson.length()).mapNotNull { crossingIndex ->
+                val crossing = crossingsJson.optJSONObject(crossingIndex) ?: return@mapNotNull null
+                val start = crossing.optJSONObject("start") ?: return@mapNotNull null
+                val end = crossing.optJSONObject("end") ?: return@mapNotNull null
+                runCatching {
+                    PedestrianCrossing(
+                        id = crossing.optString("id"),
+                        name = crossing.optString("name", "Пешеходный переход"),
+                        start = Point2D(start.optDouble("x"), start.optDouble("y")),
+                        end = Point2D(end.optDouble("x"), end.optDouble("y")),
+                        widthMeters = crossing.optDouble("widthMeters", 4.0).coerceIn(2.0, 12.0)
+                    )
+                }.getOrNull()
+            }
             val connectionsJson = item.optJSONArray("laneConnections") ?: JSONArray()
             val connections = (0 until connectionsJson.length()).mapNotNull { connectionIndex ->
                 val connection = connectionsJson.optJSONObject(connectionIndex) ?: return@mapNotNull null
@@ -314,6 +342,7 @@ class ProjectJsonStore(context: Context) {
                     phases = (0 until phasesJson.length()).mapNotNull { phaseIndex ->
                         val phase = phasesJson.optJSONObject(phaseIndex) ?: return@mapNotNull null
                         val greens = phase.optJSONArray("greenConnectionIds") ?: JSONArray()
+                        val pedestrianGreens = phase.optJSONArray("greenCrosswalkIds") ?: JSONArray()
                         SignalPhase(
                             id = phase.optString("id"),
                             name = phase.optString("name", "Фаза " + (phaseIndex + 1)),
@@ -322,7 +351,8 @@ class ProjectJsonStore(context: Context) {
                             redYellowSeconds = phase.optInt("redYellowSeconds", 2),
                             flashingGreenSeconds = phase.optInt("flashingGreenSeconds", 3),
                             yellowSeconds = phase.optInt("yellowSeconds", 3),
-                            allRedSeconds = phase.optInt("allRedSeconds", 1)
+                            allRedSeconds = phase.optInt("allRedSeconds", 1),
+                            greenCrosswalkIds = (0 until pedestrianGreens.length()).map { pedestrianGreens.getString(it) }.toSet()
                         )
                     }
                 )
@@ -338,6 +368,7 @@ class ProjectJsonStore(context: Context) {
                 junctionNodes = nodes,
                 safetyIslands = islands,
                 laneConnections = connections,
+                pedestrianCrossings = pedestrianCrossings,
                 signalPlan = signalPlan
             )
         }
