@@ -93,13 +93,16 @@ object PedestrianSimulationEngine {
         if (!timing.isValid) diagnostics += "В плане есть ошибки назначения сигналов; пешеходный выпуск ограничен только корректно назначенными фазами."
 
         val unsafePedestrianPhases = timing.diagnostics
-            .filter { it.code == SignalPlanIssueCode.PEDESTRIAN_VEHICLE_CONFLICT ||
-                it.code == SignalPlanIssueCode.CROSSWALK_ASSIGNED_MULTIPLE_PHASES }
+            .filter { it.code == SignalPlanIssueCode.PEDESTRIAN_VEHICLE_CONFLICT }
             .mapNotNull { it.phaseId }.toSet()
+        val unsafeCrosswalks = timing.diagnostics
+            .filter { it.code == SignalPlanIssueCode.CROSSWALK_ASSIGNED_MULTIPLE_PHASES }
+            .mapNotNull { it.crosswalkId }.toSet()
         val greenWindows = validDemands.associate { demand ->
             demand.crossingId to timing.phaseWindows.filter { window ->
                 window.phaseId in phasesByCrossing[demand.crossingId].orEmpty() &&
-                    window.phaseId !in unsafePedestrianPhases
+                    window.phaseId !in unsafePedestrianPhases &&
+                    demand.crossingId !in unsafeCrosswalks
             }
         }
         val waiting = validDemands.associate { it.crossingId to ArrayDeque<Agent>() }
@@ -117,7 +120,7 @@ object PedestrianSimulationEngine {
         var nextSnapshot = 0.0
         val snapshots = mutableListOf<PedestrianSimulationSnapshot>()
         val step = timeStepSeconds
-        val planEnabled = intersection.signalPlan?.enabled == true && timing.cycleLengthSeconds > 0
+        val planEnabled = intersection.signalPlan?.enabled == true && timing.cycleLengthSeconds > 0 && timing.isValid
 
         fun remainingPedestrianGreen(crossingId: String, atSeconds: Double): Double {
             if (!planEnabled) return 0.0
