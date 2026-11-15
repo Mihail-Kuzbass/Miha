@@ -49,6 +49,10 @@ import ru.trafficsignalstudio.geometry.SignalPlanTimingAnalyzer
 import ru.trafficsignalstudio.geometry.TrafficSimulationDemand
 import ru.trafficsignalstudio.geometry.TrafficSimulationEngine
 import ru.trafficsignalstudio.geometry.TrafficSimulationResult
+import ru.trafficsignalstudio.geometry.PedestrianFlowDemand
+import ru.trafficsignalstudio.geometry.PedestrianSimulationEngine
+import ru.trafficsignalstudio.geometry.PedestrianSimulationResult
+import ru.trafficsignalstudio.geometry.SimulatedPedestrian
 import ru.trafficsignalstudio.geometry.TrafficSimulationSnapshot
 import ru.trafficsignalstudio.geometry.TrajectoryConflictAnalyzer
 import ru.trafficsignalstudio.model.Intersection
@@ -125,6 +129,10 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
     var approachStorageLength by remember(intersection.id) { mutableStateOf("120") }
     var approachSpeed by remember(intersection.id) { mutableStateOf("30") }
     var result by remember(intersection.id) { mutableStateOf<TrafficSimulationResult?>(null) }
+    var pedestrianResult by remember(intersection.id) { mutableStateOf<PedestrianSimulationResult?>(null) }
+    var pedestrianFlows by remember(intersection.id) {
+        mutableStateOf(intersection.pedestrianCrossings.associate { it.id to "120" })
+    }
     var selectedSnapshotIndex by remember(intersection.id) { mutableStateOf(0) }
     var isPlaying by remember(intersection.id) { mutableStateOf(false) }
     var zoomScale by remember(intersection.id) { mutableStateOf(1f) }
@@ -146,6 +154,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
     fun updateForm(connectionId: String, form: MovementDemandForm) {
         forms = forms + (connectionId to form)
         result = null
+        pedestrianResult = null
         isPlaying = false
     }
 
@@ -244,6 +253,33 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                     Text("Не распределено по категориям: ${(total - classified).coerceAtLeast(0.0).toInt()} авт./ч",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (classified > total) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        if (intersection.pedestrianCrossings.isNotEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Пешеходные потоки", style = MaterialTheme.typography.titleMedium)
+                    intersection.pedestrianCrossings.forEach { crossing ->
+                        Text("${crossing.name} · длина ${"%.1f".format(crossing.crossingLengthMeters)} м · ширина ${"%.1f".format(crossing.widthMeters)} м",
+                            style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(
+                            value = pedestrianFlows[crossing.id] ?: "120",
+                            onValueChange = { raw ->
+                                pedestrianFlows = pedestrianFlows + (crossing.id to raw.filter { it.isDigit() || it == '.' || it == ',' })
+                                pedestrianResult = null
+                                result = null
+                            },
+                            label = { Text("Пешеходов в час") },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                        val assigned = intersection.signalPlan?.phases.orEmpty().any { crossing.id in it.greenCrosswalkIds }
+                        Text(if (assigned) "Пешеходная фаза назначена." else "Нет разрешающей пешеходной фазы: люди будут ожидать.",
+                            color = if (assigned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text("Симуляция выпускает людей только при наличии зелёной пешеходной фазы и достаточного времени для освобождения перехода.",
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -385,7 +421,16 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                                 val computed = withContext(Dispatchers.Default) {
                                     TrafficSimulationEngine.run(intersection, simulationDemand)
                                 }
+                                val pedestrianDemands = intersection.pedestrianCrossings.mapNotNull { crossing ->
+                                    val flow = pedestrianFlows[crossing.id]?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+                                    if (flow > 0.0) PedestrianFlowDemand(crossing.id, flow) else null
+                                }
+                                val pedestrianComputed = if (pedestrianDemands.isEmpty()) null else withContext(Dispatchers.Default) {
+                                    PedestrianSimulationEngine.run(intersection, pedestrianDemands,
+                                        durationSeconds = durationMinutes * 60)
+                                }
                                 result = computed
+                                pedestrianResult = pedestrianComputed
                                 selectedSnapshotIndex = 0
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
@@ -438,6 +483,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                         simulation.snapshots.getOrNull(selectedSnapshotIndex),
                         zoomScale,
                         panOffset,
+                        pedestrians = pedestrianResult?.snapshots?.getOrNull(selectedSnapshotIndex)?.activePedestrians.orEmpty(),
                         onPan = { dragAmount -> panOffset += dragAmount }
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -457,6 +503,20 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                         Button(onClick = { isPlaying = !isPlaying }) { Text(if (isPlaying) "Пауза" else "Воспроизвести") }
                         OutlinedButton(onClick = { selectedSnapshotIndex = 0; isPlaying = false }) { Text("В начало") }
                         Text("Шаг 1 с", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            pedestrianResult?.let { pedestrians ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Результаты пешеходного движения", style = MaterialTheme.typography.titleMedium)
+                        MetricLine("Прибыло пешеходов", "${pedestrians.totalArrivals}")
+                        MetricLine("Завершили переход", "${pedestrians.totalCompleted}")
+                        MetricLine("Ожидают в конце", "${pedestrians.totalWaitingAtEnd}")
+                        MetricLine("Максимальная очередь", "${pedestrians.maximumQueue}")
+                        MetricLine("Среднее ожидание", "${"%.1f".format(pedestrians.averageWaitingSeconds)} с")
+                        pedestrians.diagnostics.forEach { Text(it, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error) }
                     }
                 }
             }
@@ -592,6 +652,7 @@ private fun TrafficSimulationCanvas(
     snapshot: TrafficSimulationSnapshot?,
     zoomScale: Float,
     panOffset: Offset,
+    pedestrians: List<SimulatedPedestrian> = emptyList(),
     onPan: (Offset) -> Unit
 ) {
     val trajectories = remember(intersection.id, intersection.laneConnections) {
@@ -620,7 +681,8 @@ private fun TrafficSimulationCanvas(
         }
         // Keep the viewport anchored to fixed intersection geometry; moving vehicles must not shift the origin.
         val intersectionPoints = trajectories.flatMap { it.points }
-        val allPoints = intersectionPoints + approachExtensions
+        val crossingPoints = intersection.pedestrianCrossings.flatMap { listOf(it.start, it.end) }
+        val allPoints = intersectionPoints + approachExtensions + crossingPoints
         if (allPoints.isEmpty()) return@Canvas
         val minX = allPoints.minOf { it.xMeters }; val maxX = allPoints.maxOf { it.xMeters }
         val minY = allPoints.minOf { it.yMeters }; val maxY = allPoints.maxOf { it.yMeters }
@@ -628,14 +690,42 @@ private fun TrafficSimulationCanvas(
         val spanY = (maxY - minY).coerceAtLeast(10.0)
         val scale = minOf(size.width / spanX.toFloat(), size.height / spanY.toFloat()) * 0.78f * zoomScale.coerceIn(0.5f, 4f)
         // Zoom is centered on the intersection geometry, while panOffset moves the complete scene.
-        val centerX = ((intersectionPoints.minOf { it.xMeters } + intersectionPoints.maxOf { it.xMeters }) / 2.0).toFloat()
-        val centerY = ((intersectionPoints.minOf { it.yMeters } + intersectionPoints.maxOf { it.yMeters }) / 2.0).toFloat()
+        val anchorPoints = intersectionPoints.ifEmpty { allPoints }
+        val centerX = ((anchorPoints.minOf { it.xMeters } + anchorPoints.maxOf { it.xMeters }) / 2.0).toFloat()
+        val centerY = ((anchorPoints.minOf { it.yMeters } + anchorPoints.maxOf { it.yMeters }) / 2.0).toFloat()
         val origin = Offset(
             size.width / 2f - centerX * scale + panOffset.x,
             size.height / 2f + centerY * scale + panOffset.y
         )
         fun map(point: ru.trafficsignalstudio.model.Point2D) =
             Offset(origin.x + point.xMeters.toFloat() * scale, origin.y - point.yMeters.toFloat() * scale)
+        intersection.pedestrianCrossings.forEach { crossing ->
+            val dx = crossing.end.xMeters - crossing.start.xMeters
+            val dy = crossing.end.yMeters - crossing.start.yMeters
+            val length = hypot(dx, dy).coerceAtLeast(0.001)
+            val px = -dy / length * crossing.widthMeters / 2.0
+            val py = dx / length * crossing.widthMeters / 2.0
+            val corners = listOf(
+                ru.trafficsignalstudio.model.Point2D(crossing.start.xMeters + px, crossing.start.yMeters + py),
+                ru.trafficsignalstudio.model.Point2D(crossing.end.xMeters + px, crossing.end.yMeters + py),
+                ru.trafficsignalstudio.model.Point2D(crossing.end.xMeters - px, crossing.end.yMeters - py),
+                ru.trafficsignalstudio.model.Point2D(crossing.start.xMeters - px, crossing.start.yMeters - py)
+            )
+            val band = Path().apply {
+                moveTo(map(corners.first()).x, map(corners.first()).y)
+                corners.drop(1).forEach { point -> lineTo(map(point).x, map(point).y) }
+                close()
+            }
+            drawPath(band, Color(0xFF455A64))
+            for (stripe in 0 until 7) {
+                val t = (stripe + 0.5) / 7.0
+                val cx = crossing.start.xMeters + dx * t
+                val cy = crossing.start.yMeters + dy * t
+                drawLine(Color.White, map(ru.trafficsignalstudio.model.Point2D(cx + px, cy + py)),
+                    map(ru.trafficsignalstudio.model.Point2D(cx - px, cy - py)),
+                    strokeWidth = (0.28f * scale).coerceAtLeast(2f))
+            }
+        }
         trajectories.forEach { trajectory ->
             val path = Path()
             trajectory.points.forEachIndexed { index, point ->
@@ -666,6 +756,18 @@ private fun TrafficSimulationCanvas(
             drawCircle(Color(0xFFE53935), radius = 8f * zoomScale, center = marker)
             drawLine(Color.White, Offset(marker.x - 5f, marker.y - 5f), Offset(marker.x + 5f, marker.y + 5f), strokeWidth = 2.5f)
             drawLine(Color.White, Offset(marker.x - 5f, marker.y + 5f), Offset(marker.x + 5f, marker.y - 5f), strokeWidth = 2.5f)
+        }
+        pedestrians.forEach { pedestrian ->
+            val crossing = intersection.pedestrianCrossings.firstOrNull { it.id == pedestrian.crossingId } ?: return@forEach
+            val progress = if (pedestrian.direction >= 0) pedestrian.progress else 1.0 - pedestrian.progress
+            val point = pointAtProgress(listOf(crossing.start, crossing.end), progress)
+            val center = map(point)
+            val radius = if (pedestrian.waiting) 2.7f else 4.0f
+            drawCircle(if (pedestrian.waiting) Color(0xFFFFB74D) else Color(0xFFFFEB3B), radius, center)
+            if (!pedestrian.waiting) {
+                drawLine(Color(0xFF263238), Offset(center.x, center.y + radius),
+                    Offset(center.x, center.y + radius * 2.0f), strokeWidth = 1.5f)
+            }
         }
         snapshot?.activeVehicles?.forEach { vehicle ->
             val trajectory = trajectoryById[vehicle.connectionId] ?: return@forEach
