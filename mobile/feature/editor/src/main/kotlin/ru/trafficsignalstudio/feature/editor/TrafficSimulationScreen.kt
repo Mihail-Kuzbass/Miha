@@ -422,7 +422,7 @@ fun TrafficSimulationScreen(intersection: Intersection, onBack: () -> Unit) {
                                     TrafficSimulationEngine.run(intersection, simulationDemand)
                                 }
                                 val pedestrianDemands = intersection.pedestrianCrossings.mapNotNull { crossing ->
-                                    val flow = pedestrianFlows[crossing.id]?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+                                    val flow = pedestrianFlows[crossing.id]?.replace(',', '.')?.toDoubleOrNull() ?: 120.0
                                     if (flow > 0.0) PedestrianFlowDemand(crossing.id, flow) else null
                                 }
                                 val pedestrianComputed = if (pedestrianDemands.isEmpty()) null else withContext(Dispatchers.Default) {
