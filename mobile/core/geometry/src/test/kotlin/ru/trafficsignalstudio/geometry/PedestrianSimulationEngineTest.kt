@@ -155,4 +155,31 @@ class PedestrianSimulationEngineTest {
         })
     }
 
+    @Test
+    fun conflictCheckIncludesCrosswalkBandAndVehicleBodyWidth() {
+        val crossing = PedestrianCrossing(
+            id = "nearby-crossing",
+            name = "Переход рядом с траекторией",
+            start = Point2D(2.5, -5.0),
+            end = Point2D(2.5, 5.0),
+            widthMeters = 4.0
+        )
+        val north = Approach("north", "Север", 0.0, listOf(Lane(id = "north-in", index = 1)))
+        val south = Approach("south", "Юг", 180.0, listOf(Lane(
+            id = "south-out", index = 1, flowDirection = LaneFlowDirection.OUT_OF_INTERSECTION
+        )))
+        val intersection = Intersection(
+            name = "Проверка ширины перехода",
+            type = IntersectionType.CUSTOM,
+            approaches = listOf(north, south),
+            laneConnections = listOf(LaneConnection(
+                id = "north-south", fromApproachId = "north", fromLaneId = "north-in",
+                toApproachId = "south", toLaneId = "south-out"
+            )),
+            pedestrianCrossings = listOf(crossing)
+        )
+        assertTrue("Траектория проходит в пределах габарита перехода и ТС.",
+            PedestrianConflictAnalyzer.analyze(intersection).any { it.crossingId == crossing.id })
+    }
+
 }
