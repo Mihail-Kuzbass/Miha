@@ -239,15 +239,22 @@ object IntersectionGeometryEditor {
         intersection.signalPlan?.let { plan ->
             val connectionIds = intersection.laneConnections.map { it.id }.toSet()
             val assignedIds = plan.phases.flatMap { it.greenConnectionIds }
+            val assignedCrosswalkIds = plan.phases.flatMap { it.greenCrosswalkIds }
+            val crosswalkIds = intersection.pedestrianCrossings.map { it.id }.toSet()
             if (plan.phases.map { it.id }.distinct().size != plan.phases.size) add("Идентификаторы светофорных фаз должны быть уникальными")
             plan.phases.forEach { phase ->
                 if (phase.name.isBlank()) add("У светофорной фазы отсутствует название")
                 if (phase.greenSeconds <= 0) add("Длительность зелёного сигнала должна быть положительной")
                 if (phase.yellowSeconds < 0 || phase.allRedSeconds < 0) add("Интервалы жёлтого и общего красного не могут быть отрицательными")
-                if (phase.greenConnectionIds.isEmpty()) add("Фаза «${phase.name}» не содержит разрешённых движений")
+                if (phase.greenConnectionIds.isEmpty() && phase.greenCrosswalkIds.isEmpty()) add("Фаза «${phase.name}» не содержит разрешённых движений или пешеходных переходов")
                 if (phase.greenConnectionIds.any { it !in connectionIds }) add("Фаза «${phase.name}» ссылается на несуществующую связь полос")
+                if (phase.greenCrosswalkIds.any { it !in crosswalkIds }) add("Фаза «${phase.name}» ссылается на несуществующий пешеходный переход")
             }
             if (assignedIds.size != assignedIds.distinct().size) add("Одно движение назначено зелёным сразу в нескольких фазах")
+            if (assignedCrosswalkIds.size != assignedCrosswalkIds.distinct().size) add("Один пешеходный переход назначен зелёным сразу в нескольких фазах")
+        }
+        if (intersection.pedestrianCrossings.map { it.id }.distinct().size != intersection.pedestrianCrossings.size) {
+            add("Идентификаторы пешеходных переходов должны быть уникальными")
         }
         if (intersection.safetyIslands.map { it.id }.distinct().size != intersection.safetyIslands.size) {
             add("Идентификаторы островков безопасности должны быть уникальными")
