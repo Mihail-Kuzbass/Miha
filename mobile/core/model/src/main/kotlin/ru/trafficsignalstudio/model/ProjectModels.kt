@@ -117,6 +117,33 @@ data class SafetyIsland(
     val elevationLevel: Int = 0
 )
 
+/**
+ * Signal-controlled pedestrian crossing. The centreline runs from one curb
+ * to the opposite curb; width is measured along the roadway.
+ */
+data class PedestrianCrossing(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Пешеходный переход",
+    val start: Point2D,
+    val end: Point2D,
+    val widthMeters: Double = 4.0
+) {
+    init {
+        require(name.isNotBlank())
+        require(start.xMeters.isFinite() && start.yMeters.isFinite())
+        require(end.xMeters.isFinite() && end.yMeters.isFinite())
+        require(kotlin.math.hypot(end.xMeters - start.xMeters, end.yMeters - start.yMeters) >= 1.0) {
+            "Длина пешеходного перехода должна быть не менее 1 м."
+        }
+        require(widthMeters.isFinite() && widthMeters in 2.0..12.0) {
+            "Ширина пешеходного перехода должна быть от 2 до 12 м."
+        }
+    }
+
+    val crossingLengthMeters: Double
+        get() = kotlin.math.hypot(end.xMeters - start.xMeters, end.yMeters - start.yMeters)
+}
+
 data class Intersection(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -127,7 +154,8 @@ data class Intersection(
     val junctionNodes: List<RoadJunctionNode> = emptyList(),
     val safetyIslands: List<SafetyIsland> = emptyList(),
     val laneConnections: List<LaneConnection> = emptyList(),
-    val signalPlan: SignalPlan? = null
+    val signalPlan: SignalPlan? = null,
+    val pedestrianCrossings: List<PedestrianCrossing> = emptyList()
 )
 
 enum class CoordinationDirection { FORWARD, REVERSE, BIDIRECTIONAL }
@@ -204,7 +232,7 @@ data class ProjectDocument(
     val network: RoadNetwork = RoadNetwork()
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 11
+        const val CURRENT_SCHEMA_VERSION = 12
 
         fun newProject(name: String): ProjectDocument =
             ProjectDocument(name = name.trim().ifEmpty { "Новый проект" })
