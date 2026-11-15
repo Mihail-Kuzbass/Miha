@@ -380,9 +380,11 @@ fun IntersectionEditorScreen(
                                 OutlinedButton(onClick = {
                                     updateIntersection(intersection.copy(
                                         pedestrianCrossings = intersection.pedestrianCrossings.filterNot { it.id == crossing.id },
-                                        signalPlan = intersection.signalPlan?.copy(phases = intersection.signalPlan.phases.map { phase ->
-                                            phase.copy(greenCrosswalkIds = phase.greenCrosswalkIds - crossing.id)
-                                        })
+                                        signalPlan = intersection.signalPlan?.let { plan ->
+                                            plan.copy(phases = plan.phases.map { phase ->
+                                                phase.copy(greenCrosswalkIds = phase.greenCrosswalkIds - crossing.id)
+                                            })
+                                        }
                                     ))
                                 }) { Text("Удалить") }
                             }
